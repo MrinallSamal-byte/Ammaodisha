@@ -26,7 +26,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { MapView } from "./MapView";
 import { CHANGELOG, CATEGORIES, SEVERITY, STATUS_LABELS } from "../services/constants";
 import { backend } from "../services/backend";
-import { findNearestWard, findWardInGeoJson, isInsideBangalore } from "../services/geo";
+import { findNearestWard, findWardInGeoJson, isInsideCity } from "../services/geo";
 import { canSubmitReport, hasUpvoted } from "../services/limits";
 import { generateBBMPComplaint, getReportShareText, getWhatsAppUrl } from "../services/share";
 import { daysActive, timeAgo } from "../services/time";
@@ -138,11 +138,11 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
 
       <header className="topbar safe-top">
         <button className="brand-chip" onClick={() => navigate("/")} aria-label="Go to map">
-          <img src="/Favicon.svg" alt="" />
-          <span>NammaKasa</span>
+          <img src="/logo.png" alt="" />
+          <span>Amma Odisha</span>
         </button>
         <div className="topbar-actions">
-          <IconButton label="About NammaKasa" onClick={() => setShowAbout(true)}>
+          <IconButton label="About Amma Odisha" onClick={() => setShowAbout(true)}>
             <Info size={17} />
           </IconButton>
           <IconButton label="What's new" onClick={() => setShowChangelog(true)}>
@@ -172,7 +172,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
         <div className="sheet-block">
           <div className="sheet-title-row">
             <div>
-              <p className="eyebrow">Bengaluru (BBMP)</p>
+              <p className="eyebrow">Bhubaneswar (BMC)</p>
               <h1>Garbage Report</h1>
             </div>
             <button className="tiny-action" onClick={refreshReports}>
@@ -318,12 +318,12 @@ function IntroOverlay({ onClose }: { onClose: () => void }) {
   return (
     <button className="intro-overlay" onClick={onClose}>
       <div className="intro-card">
-        <img src="/Favicon.svg" alt="" />
+        <img src="/logo.png" alt="" />
         <p className="eyebrow">v0.3.0</p>
-        <h2>Bengaluru has a garbage problem.</h2>
+        <h2>Bhubaneswar has a garbage problem.</h2>
         <p>Report it. Photograph it. Track who is responsible.</p>
         <small>Every dump is mapped to the responsible ward, MLA, and MP. When enough citizens report, it becomes impossible to ignore.</small>
-        <b>243 wards · 28 MLAs · 4 MPs · All of Bengaluru</b>
+        <b>67 wards · 4 MLAs · 1 MP · All of Bhubaneswar</b>
         <span>Tap anywhere to continue</span>
       </div>
     </button>
@@ -422,7 +422,7 @@ function ReportDetail({
     const url = `${location.origin}/report/${report.id}`;
     const text = getReportShareText(report, ward, mla);
     if (navigator.share) {
-      await navigator.share({ title: `Garbage Report — ${ward?.ward_name ?? "Bengaluru"}`, text, url });
+      await navigator.share({ title: `Garbage Report — ${ward?.ward_name ?? "Bhubaneswar"}`, text, url });
     } else {
       await navigator.clipboard?.writeText(url);
     }
@@ -484,7 +484,7 @@ function ReportDetail({
             </button>
             <button onClick={complaint}>
               <MessageCircle size={16} />
-              WhatsApp BBMP
+              WhatsApp BMC
             </button>
             {report.status !== "resolved" && (
               <button onClick={() => setShowResolve(true)} className="green-action">
@@ -626,7 +626,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
         setLocation({ lat, lng });
-        if (!isInsideBangalore(lat, lng)) {
+        if (!isInsideCity(lat, lng)) {
           setLocationState("outside");
           return;
         }
@@ -852,14 +852,14 @@ function AboutSheet({ onClose }: { onClose: () => void }) {
         <button className="close-button" onClick={onClose}>
           <X size={18} />
         </button>
-        <h2>Why NammaKasa?</h2>
-        <p className="eyebrow">NAMMA = OUR · KASA = GARBAGE</p>
+        <h2>Why Amma Odisha?</h2>
+        <p className="eyebrow">AMMA ODISHA</p>
         <p>
-          Bengaluru generates over <strong>6,000 tonnes</strong> of waste daily. Despite BBMP's efforts, illegal dumping persists across the city — on sidewalks,
+          Bhubaneswar generates over <strong>1,200 tonnes</strong> of waste daily. Despite BMC's efforts, illegal dumping persists across the city — on sidewalks,
           vacant plots, and road corners. Citizens complain, but complaints disappear into bureaucratic black holes.
         </p>
         <p>
-          <strong>NammaKasa changes the equation.</strong> Every garbage dump is mapped, photographed, and linked to the responsible ward, MLA, and MP. When
+          <strong>Amma Odisha changes the equation.</strong> Every garbage dump is mapped, photographed, and linked to the responsible ward, MLA, and MP. When
           enough citizens report the same spot, it becomes impossible to ignore. The data is public, the accountability is permanent.
         </p>
         <p>This is crowdsourced civic infrastructure — built by citizens, for citizens.</p>

@@ -1,4 +1,4 @@
-import { BANGALORE_BOUNDARY } from "./constants";
+import { CITY_BOUNDARY } from "./constants";
 import type { Ward, WardFeatureCollection } from "../types/domain";
 
 export function pointInRing(point: [number, number], ring: [number, number][]) {
@@ -13,8 +13,8 @@ export function pointInRing(point: [number, number], ring: [number, number][]) {
   return inside;
 }
 
-export function isInsideBangalore(lat: number, lng: number) {
-  return pointInRing([lng, lat], BANGALORE_BOUNDARY);
+export function isInsideCity(lat: number, lng: number) {
+  return pointInRing([lng, lat], CITY_BOUNDARY);
 }
 
 export function findWardInGeoJson(lat: number, lng: number, wards: Ward[], boundaries: WardFeatureCollection) {

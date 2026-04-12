@@ -1,6 +1,6 @@
 import maplibregl, { type Map as MapLibreMap, type Marker } from "maplibre-gl";
 import { useEffect, useRef } from "react";
-import { BANGALORE_CENTER, BANGALORE_ZOOM, MAP_STYLE, SEVERITY } from "../services/constants";
+import { CITY_CENTER, CITY_ZOOM, MAP_STYLE, SEVERITY } from "../services/constants";
 import type { GarbageReport, WardFeatureCollection } from "../types/domain";
 
 interface MapViewProps {
@@ -21,8 +21,8 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard 
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: MAP_STYLE,
-      center: [BANGALORE_CENTER.longitude, BANGALORE_CENTER.latitude],
-      zoom: BANGALORE_ZOOM,
+      center: [CITY_CENTER.longitude, CITY_CENTER.latitude],
+      zoom: CITY_ZOOM,
       attributionControl: false
     });
     mapRef.current = map;
@@ -96,7 +96,7 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard 
   }, [reports, onSelectReport]);
 
   return (
-    <div className="map-shell" aria-label="NammaKasa Bengaluru garbage map">
+    <div className="map-shell" aria-label="Amma Odisha Bhubaneswar garbage map">
       <div className="map-canvas" ref={containerRef} />
     </div>
   );

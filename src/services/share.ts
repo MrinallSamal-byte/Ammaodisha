@@ -25,7 +25,7 @@ export function generateBBMPComplaint(input: {
     input.photoUrl ? `Photo: ${input.photoUrl}` : null,
     "",
     "Please arrange immediate cleanup and prevent repeat dumping at this location.",
-    "Reported via NammaKasa."
+    "Reported via Amma Odisha."
   ]
     .filter(Boolean)
     .join("\n");
@@ -33,11 +33,11 @@ export function generateBBMPComplaint(input: {
 
 export function getReportShareText(report: GarbageReport, ward?: Ward, mla?: Representative, origin = location.origin) {
   const url = `${origin}/report/${report.id}`;
-  return `Garbage dump at ${report.address}, ${ward?.ward_name ?? "Bengaluru"} — ${daysActive(
+  return `Garbage dump at ${report.address}, ${ward?.ward_name ?? "Bhubaneswar"} — ${daysActive(
     report.created_at
   )} days unresolved.
 MLA: ${mla?.name ?? "?"} (${mla?.party ?? "?"})
-Tracked on NammaKasa -> ${url}
+Tracked on Amma Odisha -> ${url}
 
 Report garbage in your ward -> ${origin}`;
 }

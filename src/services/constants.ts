@@ -1,9 +1,9 @@
 import type { SeverityKey, WasteCategory } from "../types/domain";
 
-export const BANGALORE_CENTER = { latitude: 12.9716, longitude: 77.5946 };
-export const BANGALORE_ZOOM = 11.5;
+export const CITY_CENTER = { latitude: 20.2961, longitude: 85.8245 };
+export const CITY_ZOOM = 12;
 export const MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
-export const BBMP_WHATSAPP = "919448197197";
+export const BBMP_WHATSAPP = "916742432100";
 
 export const PROD_HOSTNAMES = ["nammakasa.vercel.app", "nammakasa.in", "www.nammakasa.in"];
 export const IS_STAGING = typeof window !== "undefined" && !PROD_HOSTNAMES.includes(window.location.hostname);
@@ -58,22 +58,12 @@ export const PARTY_COLORS: Record<string, string> = {
   AAP: "#5C6BC0"
 };
 
-export const BANGALORE_BOUNDARY: [number, number][] = [
-  [77.4717064, 12.9514133],
-  [77.4744831, 12.9729396],
-  [77.490584, 13.0458456],
-  [77.5401172, 13.0905894],
-  [77.579864, 13.1432172],
-  [77.6309189, 13.1264537],
-  [77.6501609, 13.0815362],
-  [77.7253762, 13.0326913],
-  [77.7794191, 12.9772567],
-  [77.7463167, 12.9193407],
-  [77.6745457, 12.8931302],
-  [77.6094125, 12.8454974],
-  [77.5451648, 12.8470138],
-  [77.488247, 12.885312],
-  [77.4717064, 12.9514133]
+export const CITY_BOUNDARY: [number, number][] = [
+  [85.70, 20.15],
+  [85.70, 20.40],
+  [85.95, 20.40],
+  [85.95, 20.15],
+  [85.70, 20.15]
 ];
 
 export const ESCALATION_THRESHOLDS = [3, 5, 10, 20, 50];

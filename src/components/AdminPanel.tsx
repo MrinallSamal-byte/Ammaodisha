@@ -115,7 +115,7 @@ export function AdminPanel() {
     return (
       <main className="admin-login">
         <section>
-          <img src="/kasa-moderator-logo.svg" alt="Kasa Moderator" />
+          <img src="/logo.png" alt="Moderator" />
           <p>Enter admin key to access the moderation queue.</p>
           <input
             type="password"
@@ -138,7 +138,7 @@ export function AdminPanel() {
     <main className="admin-shell">
       <header className="admin-header safe-top">
         <div>
-          <img src="/kasa-moderator-logo.svg" alt="Kasa Moderator" />
+          <img src="/logo.png" alt="Moderator" style={{ height: "30px", width: "auto" }} />
           <button onClick={() => void loadQueue(activeTab)} className={clsx(loading && "spin")}>
             <RefreshCw size={18} />
           </button>
