@@ -60,6 +60,10 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   const [selectedProfile, setSelectedProfile] = useState<RouteSelection>(null);
   const [focusWardNumber, setFocusWardNumber] = useState<number | null>(null);
   const [focusRequestId, setFocusRequestId] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<"newest" | "upvotes" | "oldest">("newest");
+  const [wardFilterNumber, setWardFilterNumber] = useState<number | null>(null);
+  const [wardFilterState, setWardFilterState] = useState<"idle" | "locating" | "error">("idle");
   const [showReportForm, setShowReportForm] = useState(false);
   const [showIntro, setShowIntro] = useState(() => localStorage.getItem("nk_intro_seen") !== "1");
   const [showAbout, setShowAbout] = useState(false);
@@ -67,6 +71,8 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   const [viewMode, setViewMode] = useState<"map" | "list">("map");
   const [severityFilter, setSeverityFilter] = useState<"all" | SeverityKey>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "unresolved" | "resolved">("all");
+
+  const wardsByNumber = useMemo(() => new globalThis.Map(data.wards.map((ward) => [ward.ward_number, ward])), [data.wards]);
 
   useEffect(() => {
     setReports(data.reports);
@@ -82,19 +88,37 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
     }
   }, [reports, routeSelection]);
 
-  const filteredReports = useMemo(
-    () =>
-      reports.filter((report) => {
-        if (severityFilter !== "all" && report.severity !== severityFilter) return false;
-        if (statusFilter !== "all" && report.status !== statusFilter) return false;
-        return true;
-      }),
-    [reports, severityFilter, statusFilter]
-  );
+  const filteredReports = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return reports.filter((report) => {
+      if (severityFilter !== "all" && report.severity !== severityFilter) return false;
+      if (statusFilter !== "all" && report.status !== statusFilter) return false;
+      if (wardFilterNumber != null && report.ward_number !== wardFilterNumber) return false;
+      if (!query) return true;
+      const ward = wardsByNumber.get(report.ward_number);
+      const haystack = `${report.address} ${ward?.ward_name ?? ""} ward ${report.ward_number}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [reports, severityFilter, statusFilter, wardFilterNumber, searchQuery, wardsByNumber]);
+
+  const visibleReports = useMemo(() => {
+    const next = [...filteredReports];
+    if (sortBy === "upvotes") {
+      next.sort((a, b) => (b.upvote_count ?? 0) - (a.upvote_count ?? 0));
+      return next;
+    }
+    if (sortBy === "oldest") {
+      next.sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
+      return next;
+    }
+    next.sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+    return next;
+  }, [filteredReports, sortBy]);
 
   const unresolved = reports.filter((report) => report.status !== "resolved");
   const resolved = reports.filter((report) => report.status === "resolved");
-  const worstWards = useMemo(() => getWorstWards(reports, data.wards), [reports, data.wards]);
+  const worstWards = useMemo(() => getWorstWards(filteredReports, data.wards), [filteredReports, data.wards]);
+  const filteredWard = wardFilterNumber != null ? wardsByNumber.get(wardFilterNumber) : null;
 
   const refreshReports = async () => {
     const nextReports = await backend.fetchReports();
@@ -128,6 +152,43 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
     setFocusRequestId((id) => id + 1);
   }, []);
 
+  const detectAndFilterMyWard = useCallback(() => {
+    if (!navigator.geolocation) {
+      setWardFilterState("error");
+      return;
+    }
+    setWardFilterState("locating");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        if (!isInsideCity(lat, lng)) {
+          setWardFilterState("error");
+          return;
+        }
+        const ward = findWardInGeoJson(lat, lng, data.wards, data.wardBoundaries) ?? findNearestWard(lat, lng, data.wards);
+        if (!ward) {
+          setWardFilterState("error");
+          return;
+        }
+        setWardFilterNumber(ward.ward_number);
+        focusWardOnMap(ward.ward_number);
+        setWardFilterState("idle");
+      },
+      () => setWardFilterState("error"),
+      { enableHighAccuracy: true, timeout: 9000 }
+    );
+  }, [data.wardBoundaries, data.wards, focusWardOnMap]);
+
+  const clearFilters = useCallback(() => {
+    setSeverityFilter("all");
+    setStatusFilter("all");
+    setWardFilterNumber(null);
+    setSearchQuery("");
+    setSortBy("newest");
+    setWardFilterState("idle");
+  }, []);
+
   useEffect(() => {
     if (routeSelection?.type !== "ward") return;
     const wardNumber = Number(routeSelection.id);
@@ -156,7 +217,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   return (
     <div className="app-frame">
       <MapView
-        reports={filteredReports}
+        reports={visibleReports}
         wardBoundaries={data.wardBoundaries}
         onSelectReport={handleMapReportSelect}
         onSelectWard={handleMapWardSelect}
@@ -185,7 +246,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
 
       {viewMode === "list" && (
         <div className="list-overlay">
-          <ReportList reports={filteredReports} wards={data.wards} onSelect={(report) => setSelectedReport(report)} />
+          <ReportList reports={visibleReports} wards={data.wards} onSelect={handleMapReportSelect} />
         </div>
       )}
 
@@ -225,6 +286,36 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
             <option value="resolved">Cleaned</option>
           </select>
         </div>
+
+        <div className="filter-row">
+          <input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search by locality, ward, or landmark"
+            aria-label="Search reports"
+          />
+          <select value={sortBy} onChange={(event) => setSortBy(event.target.value as "newest" | "upvotes" | "oldest")}>
+            <option value="newest">Newest First</option>
+            <option value="upvotes">Most Upvoted</option>
+            <option value="oldest">Oldest First</option>
+          </select>
+        </div>
+
+        <div className="quick-actions-row">
+          <button className={clsx("chip-button", wardFilterNumber != null && "is-active")} onClick={detectAndFilterMyWard} type="button">
+            {wardFilterState === "locating" ? <LoaderCircle className="spin" size={14} /> : <Layers size={14} />}
+            {wardFilterNumber != null ? `My Ward: ${wardFilterNumber}` : "Use My Ward"}
+          </button>
+          <button className="chip-button" onClick={clearFilters} type="button">
+            <X size={14} />
+            Clear Filters
+          </button>
+        </div>
+
+        <p className="muted">
+          Showing {visibleReports.length} reports{filteredWard ? ` in Ward ${filteredWard.ward_number}` : ""}.
+        </p>
+        {wardFilterState === "error" && <p className="warning-text">Could not detect your location inside Bhubaneswar. You can still filter manually.</p>}
 
         <button className="primary-cta" onClick={() => setShowReportForm(true)}>
           <Plus size={18} />
@@ -483,6 +574,10 @@ function ReportDetail({
     window.open(getWhatsAppUrl(text), "_blank", "noopener,noreferrer");
   };
 
+  const openDirections = () => {
+    window.open(`https://www.google.com/maps?q=${report.latitude},${report.longitude}`, "_blank", "noopener,noreferrer");
+  };
+
   return (
     <div className="modal-layer" onMouseDown={onClose}>
       <article className="detail-sheet" onMouseDown={(event) => event.stopPropagation()}>
@@ -522,6 +617,10 @@ function ReportDetail({
             <button onClick={shareReport}>
               <Share2 size={16} />
               Share
+            </button>
+            <button onClick={openDirections}>
+              <ArrowUpRight size={16} />
+              Directions
             </button>
             <button onClick={complaint}>
               <MessageCircle size={16} />
