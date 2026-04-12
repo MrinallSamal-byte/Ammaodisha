@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { IS_STAGING, LOCAL_REPORTS_KEY } from "./constants";
+import { findNearestWard, findWardInGeoJson, isInsideCity } from "./geo";
 import { canSubmitReport, getFingerprint, hasUpvoted, markUpvoted, recordSubmission } from "./limits";
 import type {
   AdminStats,
@@ -41,6 +42,54 @@ function normalizeReport(report: GarbageReport): GarbageReport {
     status: report.status ?? "unresolved",
     moderation_status: report.moderation_status ?? "approved"
   };
+}
+
+function getFallbackWard(sourceWardNumber: number, wards: Ward[]) {
+  if (!wards.length) return null;
+  const bySameNumber = wards.find((ward) => ward.ward_number === sourceWardNumber);
+  if (bySameNumber) return bySameNumber;
+  const sorted = [...wards].sort((a, b) => a.ward_number - b.ward_number);
+  const index = (Math.abs(sourceWardNumber || 1) - 1) % sorted.length;
+  return sorted[index] ?? sorted[0];
+}
+
+function getBhubaneswarAddress(ward: Ward) {
+  const locality = ward.locality_name?.trim() || ward.ward_name;
+  return `${locality}, Ward ${ward.ward_number}, Bhubaneswar`;
+}
+
+function shouldRewriteAddress(address: string, outsideCity: boolean) {
+  if (outsideCity) return true;
+  return /bengaluru|bangalore|karnataka|hsr|koramangala|marathahalli|mahadevapura|banashankari/i.test(address);
+}
+
+function normalizeToBhubaneswar(report: GarbageReport, wards: Ward[], boundaries: WardFeatureCollection): GarbageReport {
+  const latitude = Number(report.latitude);
+  const longitude = Number(report.longitude);
+  const outsideCity = !isInsideCity(latitude, longitude);
+  const wardFromPoint = findWardInGeoJson(latitude, longitude, wards, boundaries);
+  const ward =
+    wardFromPoint ??
+    getFallbackWard(Number(report.ward_number), wards) ??
+    findNearestWard(latitude, longitude, wards) ??
+    wards[0];
+
+  if (!ward) return report;
+
+  const insideWard = Boolean(wardFromPoint) && !outsideCity;
+  const nextAddress = shouldRewriteAddress(report.address || "", outsideCity) ? getBhubaneswarAddress(ward) : report.address;
+
+  return {
+    ...report,
+    ward_number: ward.ward_number,
+    latitude: insideWard ? latitude : Number(ward.center_lat),
+    longitude: insideWard ? longitude : Number(ward.center_lng),
+    address: nextAddress
+  };
+}
+
+function normalizeReportsForBhubaneswar(reports: GarbageReport[], wards: Ward[], boundaries: WardFeatureCollection) {
+  return reports.map((report) => normalizeToBhubaneswar(report, wards, boundaries));
 }
 
 function mergeLocalReports(seed: GarbageReport[]) {
@@ -118,14 +167,19 @@ class LocalBackend implements Backend {
         fetchJson<Representative[]>("/representatives.json"),
         fetchJson<GarbageReport[]>("/reports.json")
       ]);
-      this.data = { wards, wardBoundaries, representatives, reports: mergeLocalReports(reports) };
+      this.data = {
+        wards,
+        wardBoundaries,
+        representatives,
+        reports: normalizeReportsForBhubaneswar(mergeLocalReports(reports), wards, wardBoundaries)
+      };
     }
     return this.data;
   }
 
   async fetchReports() {
     const data = await this.fetchCivicData();
-    data.reports = mergeLocalReports(data.reports);
+    data.reports = normalizeReportsForBhubaneswar(mergeLocalReports(data.reports), data.wards, data.wardBoundaries);
     return data.reports;
   }
 
@@ -283,10 +337,11 @@ class SupabaseBackend extends LocalBackend {
     ]);
     if (wards.error) throw wards.error;
     if (representatives.error) throw representatives.error;
+    const safeWards = wards.data ?? [];
     return {
-      wards: wards.data ?? [],
+      wards: safeWards,
       representatives: representatives.data ?? [],
-      reports,
+      reports: normalizeReportsForBhubaneswar(reports, safeWards, wardBoundaries),
       wardBoundaries
     };
   }
