@@ -264,7 +264,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
           </span>
         </button>
         <div className="topbar-actions">
-          <a className="icon-button" href="https://x.com/realmojojojo_" target="_blank" rel="noreferrer" aria-label="Follow on X">
+          <a className="icon-button" href="https://x.com/MrinallSamal" target="_blank" rel="noreferrer" aria-label="Follow on X">
             <X size={17} />
           </a>
         </div>
@@ -1195,7 +1195,7 @@ function TelegramToast() {
         <strong>Join the community</strong>
         Feedback, ideas & updates on Telegram
       </span>
-      <a href="https://t.me/ammaodisha" target="_blank" rel="noreferrer">
+      <a href="https://t.me/+23jgBr4Gz6BkYTFl" target="_blank" rel="noreferrer">
         Join
       </a>
     </div>
