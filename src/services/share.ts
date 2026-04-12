@@ -1,0 +1,56 @@
+import { BBMP_WHATSAPP, CATEGORIES, SEVERITY } from "./constants";
+import type { GarbageReport, Representative, Ward } from "../types/domain";
+import { daysActive } from "./time";
+
+export function generateBBMPComplaint(input: {
+  address: string;
+  wardName: string;
+  wardNumber: number | string;
+  severity: keyof typeof SEVERITY;
+  category: keyof typeof CATEGORIES;
+  photoUrl?: string | null;
+  lat: number;
+  lng: number;
+}) {
+  const severity = SEVERITY[input.severity]?.label ?? input.severity;
+  const category = CATEGORIES[input.category] ?? input.category;
+  return [
+    `Garbage Complaint — Ward #${input.wardNumber}, ${input.wardName}`,
+    "",
+    `Location: ${input.address}`,
+    `Ward: #${input.wardNumber} — ${input.wardName}`,
+    `Severity: ${severity}`,
+    `Waste Type: ${category}`,
+    `GPS: ${input.lat}, ${input.lng}`,
+    input.photoUrl ? `Photo: ${input.photoUrl}` : null,
+    "",
+    "Please arrange immediate cleanup and prevent repeat dumping at this location.",
+    "Reported via NammaKasa."
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function getReportShareText(report: GarbageReport, ward?: Ward, mla?: Representative, origin = location.origin) {
+  const url = `${origin}/report/${report.id}`;
+  return `Garbage dump at ${report.address}, ${ward?.ward_name ?? "Bengaluru"} — ${daysActive(
+    report.created_at
+  )} days unresolved.
+MLA: ${mla?.name ?? "?"} (${mla?.party ?? "?"})
+Tracked on NammaKasa -> ${url}
+
+Report garbage in your ward -> ${origin}`;
+}
+
+export function getWhatsAppUrl(message: string) {
+  return `https://wa.me/${BBMP_WHATSAPP}?text=${encodeURIComponent(message)}`;
+}
+
+export async function shareOrCopy(data: ShareData, fallbackUrl: string) {
+  if (navigator.share) {
+    await navigator.share(data);
+    return "shared";
+  }
+  await navigator.clipboard?.writeText(data.url ?? fallbackUrl);
+  return "copied";
+}
