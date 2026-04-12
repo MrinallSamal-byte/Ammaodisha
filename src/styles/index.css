@@ -102,12 +102,13 @@ button:disabled {
   border: 3px solid #ffffff;
   box-shadow: 0 4px 14px rgb(0 0 0 / 24%);
   outline: 1px solid rgb(0 0 0 / 8%);
-  transition: scale 0.14s ease;
+  transition: box-shadow 0.14s ease, outline-color 0.14s ease;
 }
 
 .garbage-marker:hover,
 .garbage-marker:focus-visible {
-  scale: 1.16;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 28%);
+  outline-color: rgb(0 0 0 / 18%);
 }
 
 .topbar {

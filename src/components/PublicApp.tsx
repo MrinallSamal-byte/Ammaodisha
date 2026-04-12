@@ -403,6 +403,12 @@ function ReportDetail({
   const [isUpvoting, setIsUpvoting] = useState(false);
   const [upvoted, setUpvoted] = useState(() => hasUpvoted(report.id));
   const [showResolve, setShowResolve] = useState(false);
+
+  useEffect(() => {
+    setUpvoted(hasUpvoted(report.id));
+    setIsUpvoting(false);
+  }, [report.id]);
+
   const ward = data.wards.find((item) => item.ward_number === report.ward_number);
   const mla = data.representatives.find((rep) => rep.role === "mla" && rep.constituency === ward?.assembly_constituency);
   const mp = data.representatives.find((rep) => rep.role === "mp" && rep.constituency === ward?.parliamentary_constituency);
@@ -411,10 +417,17 @@ function ReportDetail({
   const upvote = async () => {
     if (isUpvoting || upvoted) return;
     setIsUpvoting(true);
-    const result = await backend.upvoteReport(report.id);
-    setUpvoted(true);
-    if (!result.alreadyVoted && result.newCount) onUpdate({ ...report, upvote_count: result.newCount });
-    setIsUpvoting(false);
+    try {
+      const result = await backend.upvoteReport(report.id);
+      setUpvoted(true);
+      if (!result.alreadyVoted && result.newCount != null) {
+        onUpdate({ ...report, upvote_count: result.newCount });
+      }
+    } catch (error) {
+      console.error("Upvote failed", error);
+    } finally {
+      setIsUpvoting(false);
+    }
   };
 
   const shareReport = async () => {
