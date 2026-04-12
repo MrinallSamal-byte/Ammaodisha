@@ -20,6 +20,36 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undef
 const adminFunctionUrl = import.meta.env.VITE_ADMIN_FUNCTION_URL as string | undefined;
 const adminKeyFallback = import.meta.env.VITE_ADMIN_KEY || "demo";
 
+interface PoliticalRepresentativeProfile {
+  name?: string;
+  party_full?: string;
+  party_short?: string;
+  image_url?: string | null;
+  contacts?: {
+    email?: string | null;
+    phone?: string | null;
+    office_address?: string | null;
+  };
+}
+
+interface PoliticalAssemblyRecord {
+  assembly_constituency_no?: number;
+  assembly_constituency_name?: string;
+  mla_profile?: PoliticalRepresentativeProfile;
+  official_extent?: {
+    bmc_wards?: number[];
+  };
+  current_lok_sabha_member?: PoliticalRepresentativeProfile;
+}
+
+interface PoliticalMappingData {
+  lok_sabha_constituency?: {
+    constituency_name?: string;
+    current_member?: PoliticalRepresentativeProfile;
+  };
+  records?: PoliticalAssemblyRecord[];
+}
+
 function hasSupabaseConfig() {
   return Boolean(supabaseUrl && supabaseAnonKey);
 }
@@ -42,6 +72,115 @@ function normalizeReport(report: GarbageReport): GarbageReport {
     status: report.status ?? "unresolved",
     moderation_status: report.moderation_status ?? "approved"
   };
+}
+
+function getPartyCode(partyShort?: string | null, partyFull?: string | null) {
+  if (partyShort?.trim()) return partyShort.trim();
+  const normalized = (partyFull || "").toUpperCase();
+  if (normalized.includes("BIJU JANATA DAL")) return "BJD";
+  if (normalized.includes("BHARATIYA JANATA PARTY")) return "BJP";
+  if (normalized.includes("INDIAN NATIONAL CONGRESS")) return "INC";
+  if (normalized.includes("AAM AADMI PARTY")) return "AAP";
+  return partyFull?.trim() || "Independent";
+}
+
+function representativeKey(input: Pick<Representative, "role" | "constituency">) {
+  return `${input.role}:${input.constituency}`.toLowerCase();
+}
+
+function buildRepresentativesFromPoliticalMapping(mapping: PoliticalMappingData): Representative[] {
+  const representatives: Representative[] = [];
+  const mpConstituency = mapping.lok_sabha_constituency?.constituency_name?.trim() || "Bhubaneswar";
+  const mpProfile = mapping.lok_sabha_constituency?.current_member ?? mapping.records?.[0]?.current_lok_sabha_member;
+
+  if (mpProfile?.name?.trim()) {
+    representatives.push({
+      id: 1000,
+      name: mpProfile.name.trim(),
+      role: "mp",
+      constituency: mpConstituency,
+      party: getPartyCode(mpProfile.party_short, mpProfile.party_full),
+      photo_url: mpProfile.image_url ?? null,
+      email: mpProfile.contacts?.email ?? null,
+      phone: mpProfile.contacts?.phone ?? null,
+      active: true
+    });
+  }
+
+  (mapping.records || []).forEach((record, index) => {
+    const constituency = record.assembly_constituency_name?.trim();
+    const mla = record.mla_profile;
+    if (!constituency || !mla?.name?.trim()) return;
+
+    representatives.push({
+      id: record.assembly_constituency_no ?? 2000 + index,
+      name: mla.name.trim(),
+      role: "mla",
+      constituency,
+      party: getPartyCode(mla.party_short, mla.party_full),
+      photo_url: mla.image_url ?? null,
+      email: mla.contacts?.email ?? null,
+      phone: mla.contacts?.phone ?? null,
+      active: true
+    });
+  });
+
+  return representatives;
+}
+
+function mergeRepresentativesWithPoliticalMapping(seed: Representative[], mapping: PoliticalMappingData | null) {
+  if (!mapping) return seed;
+  const mapped = buildRepresentativesFromPoliticalMapping(mapping);
+  if (!mapped.length) return seed;
+
+  const byKey = new Map<string, Representative>();
+  seed.forEach((rep) => byKey.set(representativeKey(rep), rep));
+
+  mapped.forEach((rep) => {
+    const key = representativeKey(rep);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, rep);
+      return;
+    }
+    byKey.set(key, {
+      ...existing,
+      ...rep,
+      phone: rep.phone ?? existing.phone,
+      email: rep.email ?? existing.email,
+      photo_url: rep.photo_url ?? existing.photo_url
+    });
+  });
+
+  return Array.from(byKey.values());
+}
+
+function applyWardConstituencyMapping(wards: Ward[], mapping: PoliticalMappingData | null) {
+  if (!mapping?.records?.length) return wards;
+
+  const wardAssemblyMap = new Map<number, string>();
+  mapping.records.forEach((record) => {
+    const assemblyName = record.assembly_constituency_name?.trim();
+    if (!assemblyName) return;
+    (record.official_extent?.bmc_wards || []).forEach((wardNumber) => {
+      const normalizedWard = Number(wardNumber);
+      if (!Number.isFinite(normalizedWard)) return;
+      wardAssemblyMap.set(normalizedWard, assemblyName);
+    });
+  });
+
+  const parliamentary = mapping.lok_sabha_constituency?.constituency_name?.trim();
+  if (!wardAssemblyMap.size && !parliamentary) return wards;
+
+  return wards.map((ward) => {
+    const mappedAssembly = wardAssemblyMap.get(ward.ward_number);
+    if (!mappedAssembly && !parliamentary) return ward;
+    return {
+      ...ward,
+      assembly_constituency: mappedAssembly ?? ward.assembly_constituency,
+      parliamentary_constituency: parliamentary ?? ward.parliamentary_constituency
+    };
+  });
 }
 
 function getFallbackWard(sourceWardNumber: number, wards: Ward[]) {
@@ -234,12 +373,17 @@ class LocalBackend implements Backend {
 
   async fetchCivicData() {
     if (!this.data) {
-      const [wards, wardBoundaries, representatives, reports] = await Promise.all([
+      const [wardSeed, wardBoundaries, representativeSeed, reports, politicalMapping] = await Promise.all([
         fetchJson<Ward[]>("/wards.json"),
         fetchJson<WardFeatureCollection>("/ward-boundaries.json"),
-        fetchJson<Representative[]>("/representatives.json"),
-        fetchJson<GarbageReport[]>("/reports.json")
+        fetchJson<Representative[]>("/representatives.json").catch(() => []),
+        fetchJson<GarbageReport[]>("/reports.json"),
+        fetchJson<PoliticalMappingData>("/bbsr-political-mapping.json").catch(() => null)
       ]);
+
+      const wards = applyWardConstituencyMapping(wardSeed, politicalMapping);
+      const representatives = mergeRepresentativesWithPoliticalMapping(representativeSeed, politicalMapping);
+
       this.data = {
         wards,
         wardBoundaries,
@@ -399,21 +543,24 @@ class SupabaseBackend extends LocalBackend {
   }
 
   override async fetchCivicData(): Promise<CivicData> {
-    const [wards, representatives, reports, wardBoundaries] = await Promise.all([
+    const [wards, representatives, reports, wardBoundaries, politicalMapping] = await Promise.all([
       this.client
         .from("wards")
         .select("ward_number, ward_name, zone, assembly_constituency, parliamentary_constituency, center_lat, center_lng, locality_name")
         .order("ward_number"),
       this.client.from("representatives").select("*").eq("active", true),
       this.fetchReports(),
-      fetchJson<WardFeatureCollection>("/ward-boundaries.json")
+      fetchJson<WardFeatureCollection>("/ward-boundaries.json"),
+      fetchJson<PoliticalMappingData>("/bbsr-political-mapping.json").catch(() => null)
     ]);
     if (wards.error) throw wards.error;
     if (representatives.error) throw representatives.error;
-    const safeWards = wards.data ?? [];
+    const safeWards = applyWardConstituencyMapping(wards.data ?? [], politicalMapping);
+    const safeRepresentatives = mergeRepresentativesWithPoliticalMapping(representatives.data ?? [], politicalMapping);
+
     return {
       wards: safeWards,
-      representatives: representatives.data ?? [],
+      representatives: safeRepresentatives,
       reports: normalizeReportsForBhubaneswar(reports, safeWards, wardBoundaries),
       wardBoundaries
     };

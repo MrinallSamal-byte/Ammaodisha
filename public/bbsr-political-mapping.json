@@ -1,0 +1,532 @@
+{
+  "meta": {
+    "city": "Bhubaneswar",
+    "state": "Odisha",
+    "country": "India",
+    "district": "Khordha",
+    "generated_on": "2026-04-12",
+    "data_version": "bbsr-political-mapping-v2",
+    "purpose": "Location-to-MP/MLA lookup for backend database matching",
+    "schema_notes": [
+      "This file keeps locality/ward/GP matching data and adds richer representative metadata.",
+      "Use exact ward or polygon lookup first whenever possible.",
+      "Image URLs are external and should ideally be mirrored to your own CDN or bucket.",
+      "Contact fields may be null when not verified from reliable official sources."
+    ],
+    "recommended_lookup_order": [
+      "exact_bmc_ward_match",
+      "exact_gram_panchayat_match",
+      "normalized_locality_keyword_match",
+      "manual_review_or_gis_fallback"
+    ],
+    "normalization_rules": [
+      "convert to lowercase",
+      "remove punctuation",
+      "trim repeated spaces",
+      "treat bhubaneswar, bhubaneshwar, bbsr as equivalent",
+      "treat cs pur, c s pur, cspur and chandrasekharpur as equivalent"
+    ],
+    "sources_summary": {
+      "eci_2024_results": "used for winner, party, votes, vote share, margin",
+      "constituency_reference_pages": "used for constituency number, electors, reservation, linked Lok Sabha seat",
+      "uploaded_file": "used as base for existing extent + keyword mapping"
+    }
+  },
+  "lok_sabha_constituency": {
+    "constituency_no": 18,
+    "constituency_code": "OD-18",
+    "constituency_name": "Bhubaneswar",
+    "type": "LS",
+    "reservation": "None",
+    "state": "Odisha",
+    "district": "Khordha",
+    "established_year": 1952,
+    "latest_election_year": 2024,
+    "electors_2024": 1675019,
+    "assembly_segments": [
+      "Jayadev (SC)",
+      "Bhubaneswar Central (Madhya)",
+      "Bhubaneswar North (Uttar)",
+      "Ekamra-Bhubaneswar",
+      "Jatani",
+      "Begunia",
+      "Khurda"
+    ],
+    "current_member": {
+      "role": "Member of Parliament",
+      "name": "Aparajita Sarangi",
+      "party_full": "Bharatiya Janata Party",
+      "party_short": "BJP",
+      "image_url": "https://myneta.info/images_candidate/mynetai_ews5LokSabha2024/9c8310e0aa8b91a75ea1a2d87deb406e1dbbb791.jpg",
+      "profile_urls": {
+        "eci_result_page": "https://results.eci.gov.in/PcResultGenJune2024/ConstituencywiseS1818.htm",
+        "eci_candidatewise_page": "https://results.eci.gov.in/PcResultGenJune2024/candidateswise-S1818.htm",
+        "reference_page": "https://en.wikipedia.org/wiki/Bhubaneswar_Lok_Sabha_constituency",
+        "image_source_page": "https://myneta.info/LokSabha2024/candidate.php?candidate_id=8040"
+      },
+      "contacts": {
+        "email": null,
+        "phone": null,
+        "office_address": null
+      },
+      "election_2024": {
+        "winner_votes": 512519,
+        "winner_vote_share_percent": 47.36,
+        "victory_margin": 35152,
+        "runner_up_name": "Manmath Kumar Routray",
+        "runner_up_party_full": "Biju Janata Dal",
+        "runner_up_party_short": "BJD",
+        "runner_up_votes": 477367,
+        "total_votes_counted": 1082215
+      }
+    }
+  },
+  "records": [
+    {
+      "assembly_constituency_no": 113,
+      "assembly_constituency_code": "AC-113",
+      "assembly_constituency_name": "Bhubaneswar North (Uttar)",
+      "type": "SLA",
+      "reservation": "None",
+      "state": "Odisha",
+      "district": "Khordha",
+      "division": "Central Division",
+      "established_year": 2009,
+      "latest_election_year": 2024,
+      "electors_2024": 285872,
+      "linked_lok_sabha_constituency": {
+        "name": "Bhubaneswar",
+        "number": 18
+      },
+      "mla_profile": {
+        "role": "Member of Legislative Assembly",
+        "name": "Susant Kumar Rout",
+        "party_full": "Biju Janata Dal",
+        "party_short": "BJD",
+        "image_url": "https://myneta.info/images_candidate/Odisha2024/80e3799e1a9445b35f773e75098a67506c045a62.jpg",
+        "profile_urls": {
+          "eci_result_page": "https://results.eci.gov.in/AcResultGenJune2024/ConstituencywiseS18113.htm",
+          "eci_candidatewise_page": "https://results.eci.gov.in/AcResultGenJune2024/candidateswise-S18113.htm",
+          "reference_page": "https://en.wikipedia.org/wiki/Bhubaneswar_North_Assembly_constituency",
+          "image_source_page": "https://myneta.info/Odisha2024/candidate.php?candidate_id=4"
+        },
+        "contacts": {
+          "email": null,
+          "phone": null,
+          "office_address": null
+        }
+      },
+      "election_2024": {
+        "winner_name": "Susant Kumar Rout",
+        "winner_party_full": "Biju Janata Dal",
+        "winner_party_short": "BJD",
+        "winner_votes": 78179,
+        "winner_vote_share_percent": 50.63,
+        "victory_margin": 11343,
+        "runner_up_name": "Priyadarshi Mishra",
+        "runner_up_party_full": "Bharatiya Janata Party",
+        "runner_up_party_short": "BJP",
+        "runner_up_votes": 66836,
+        "total_votes_counted": 154427
+      },
+      "official_extent": {
+        "bmc_wards": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13],
+        "gram_panchayats": [
+          "Raghunathpur",
+          "Dadha",
+          "Kalyanpur",
+          "Barimunda",
+          "Kalarahanga"
+        ]
+      },
+      "match_keywords": [
+        "prasanti vihar",
+        "infocity",
+        "info city",
+        "kiit",
+        "aryapalli",
+        "maruti vihar",
+        "adarsha vihar",
+        "kalarahanga",
+        "nandan vihar",
+        "laxmi vihar",
+        "padmakesharipur",
+        "patia",
+        "patia village",
+        "kanan vihar",
+        "shree vihar",
+        "damana",
+        "pahal",
+        "johal",
+        "nakhara",
+        "hanspal",
+        "sameigadia",
+        "mancheswar village",
+        "sailashree vihar",
+        "cspur",
+        "cs pur",
+        "chandrasekharpur",
+        "district centre",
+        "omfed square",
+        "gadakana",
+        "rangamatia",
+        "mancheswar industrial estate",
+        "idco colony",
+        "vss nagar",
+        "samanta vihar",
+        "nalco square",
+        "xavier square",
+        "nabard colony",
+        "rail vihar",
+        "nalco phase 2",
+        "nilamadhab basti"
+      ],
+      "current_lok_sabha_member": {
+        "name": "Aparajita Sarangi",
+        "party_full": "Bharatiya Janata Party",
+        "party_short": "BJP",
+        "image_url": "https://myneta.info/images_candidate/mynetai_ews5LokSabha2024/9c8310e0aa8b91a75ea1a2d87deb406e1dbbb791.jpg"
+      }
+    },
+    {
+      "assembly_constituency_no": 112,
+      "assembly_constituency_code": "AC-112",
+      "assembly_constituency_name": "Bhubaneswar Central (Madhya)",
+      "type": "SLA",
+      "reservation": "None",
+      "state": "Odisha",
+      "district": "Khordha",
+      "division": "Central Division",
+      "established_year": 2009,
+      "latest_election_year": 2024,
+      "electors_2024": 219233,
+      "linked_lok_sabha_constituency": {
+        "name": "Bhubaneswar",
+        "number": 18
+      },
+      "mla_profile": {
+        "role": "Member of Legislative Assembly",
+        "name": "Ananta Narayan Jena",
+        "party_full": "Biju Janata Dal",
+        "party_short": "BJD",
+        "image_url": "https://myneta.info/images_candidate/Odisha2024/735847b6dce9de0e273f8e91d1b87265fe6e0772.jpg",
+        "profile_urls": {
+          "eci_result_page": "https://results.eci.gov.in/AcResultGenJune2024/ConstituencywiseS18112.htm",
+          "eci_candidatewise_page": "https://results.eci.gov.in/AcResultGenJune2024/candidateswise-S18112.htm",
+          "reference_page": "https://en.wikipedia.org/wiki/Bhubaneswar_Central_Assembly_constituency",
+          "image_source_page": "https://myneta.info/Odisha2024/candidate.php?candidate_id=7"
+        },
+        "contacts": {
+          "email": null,
+          "phone": null,
+          "office_address": null
+        }
+      },
+      "election_2024": {
+        "winner_name": "Ananta Narayan Jena",
+        "winner_party_full": "Biju Janata Dal",
+        "winner_party_short": "BJD",
+        "winner_votes": 53759,
+        "winner_vote_share_percent": 47.68,
+        "victory_margin": 37,
+        "runner_up_name": "Jagannath Pradhan",
+        "runner_up_party_full": "Bharatiya Janata Party",
+        "runner_up_party_short": "BJP",
+        "runner_up_votes": 53722,
+        "total_votes_counted": 112754
+      },
+      "official_extent": {
+        "bmc_wards": [16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 35, 36, 37],
+        "gram_panchayats": []
+      },
+      "match_keywords": [
+        "kalinga hospital",
+        "aranya bhawan",
+        "maitri vihar",
+        "mayfair",
+        "mayfair nagar",
+        "nalco bhawan",
+        "bajpayi nagar",
+        "tarini nagar",
+        "utkal university",
+        "postal colony",
+        "palasuni",
+        "kapileswar colony",
+        "prachi vihar",
+        "pandara",
+        "ggp colony",
+        "rasulgarh",
+        "sriram city",
+        "old bank colony",
+        "friends colony",
+        "basudev nagar",
+        "jagannath nagar",
+        "mahabir nagar",
+        "ekamra vihar",
+        "jagannath vihar",
+        "jayadev nagar",
+        "shakti vihar",
+        "nirankari nagar",
+        "saranapalli",
+        "irc village",
+        "isckon area",
+        "jayadev vihar",
+        "indradhanu market",
+        "nabard office",
+        "kalinga stadium",
+        "acharya vihar",
+        "regional college area",
+        "unit 9",
+        "ram mandir",
+        "exhibition ground",
+        "madhusudan nagar",
+        "rabindra mandap",
+        "mla colony",
+        "keshari nagar",
+        "bhubaneswar club"
+      ],
+      "current_lok_sabha_member": {
+        "name": "Aparajita Sarangi",
+        "party_full": "Bharatiya Janata Party",
+        "party_short": "BJP",
+        "image_url": "https://myneta.info/images_candidate/mynetai_ews5LokSabha2024/9c8310e0aa8b91a75ea1a2d87deb406e1dbbb791.jpg"
+      }
+    },
+    {
+      "assembly_constituency_no": 114,
+      "assembly_constituency_code": "AC-114",
+      "assembly_constituency_name": "Ekamra-Bhubaneswar",
+      "type": "SLA",
+      "reservation": "None",
+      "state": "Odisha",
+      "district": "Khordha",
+      "division": "Central Division",
+      "established_year": 2009,
+      "latest_election_year": 2024,
+      "electors_2024": 269327,
+      "linked_lok_sabha_constituency": {
+        "name": "Bhubaneswar",
+        "number": 18
+      },
+      "mla_profile": {
+        "role": "Member of Legislative Assembly",
+        "name": "Babu Singh",
+        "party_full": "Bharatiya Janata Party",
+        "party_short": "BJP",
+        "image_url": "https://myneta.info/images_candidate/mynetai_ews5Odisha2024/9bf4b3a4f8e950b8d2ec3f61a191caa6e45f7f3e.jpg",
+        "profile_urls": {
+          "eci_result_page": "https://results.eci.gov.in/AcResultGenJune2024/ConstituencywiseS18114.htm",
+          "eci_candidatewise_page": "https://results.eci.gov.in/AcResultGenJune2024/candidateswise-S18114.htm",
+          "reference_page": "https://en.wikipedia.org/wiki/Ekamra-Bhubaneswar_Assembly_constituency",
+          "image_source_page": "https://myneta.info/Odisha2024/candidate.php?candidate_id=9"
+        },
+        "contacts": {
+          "email": null,
+          "phone": null,
+          "office_address": null
+        }
+      },
+      "election_2024": {
+        "winner_name": "Babu Singh",
+        "winner_party_full": "Bharatiya Janata Party",
+        "winner_party_short": "BJP",
+        "winner_votes": 74884,
+        "winner_vote_share_percent": 49.03,
+        "victory_margin": 5023,
+        "runner_up_name": "Ashok Chandra Panda",
+        "runner_up_party_full": "Biju Janata Dal",
+        "runner_up_party_short": "BJD",
+        "runner_up_votes": 69861,
+        "total_votes_counted": 152727
+      },
+      "official_extent": {
+        "bmc_wards": [12, 14, 15, 30, 31, 32, 33, 34, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47],
+        "gram_panchayats": [
+          "Basuaghai",
+          "Itipur",
+          "Tikarapada",
+          "Dhauli",
+          "Sisupal"
+        ]
+      },
+      "match_keywords": [
+        "sainik school",
+        "adimata colony",
+        "samanta vihar",
+        "osap 7th battalion",
+        "immt",
+        "doordarshan kendra",
+        "niladri vihar sector 3",
+        "niladri vihar sector 4",
+        "niladri vihar sector 5",
+        "lumbini vihar",
+        "vip area",
+        "rental colony",
+        "sahid nagar",
+        "maharshi college",
+        "esi medical",
+        "ipicol colony",
+        "bomikhal",
+        "sarala nagar",
+        "jharapada",
+        "laxmisagar",
+        "shanti nagar",
+        "satyanagar",
+        "punjabi colony",
+        "unit 1",
+        "unit 2",
+        "unit 3",
+        "market building",
+        "pmg",
+        "bapujee nagar",
+        "ashok nagar",
+        "budheswari",
+        "laxmisagar village",
+        "badagada",
+        "kalpana",
+        "chintamaniswar",
+        "nayapalli village",
+        "nayapalli nua sahi",
+        "surya nagar",
+        "gapabandhu nagar",
+        "raj bhawan colony",
+        "delta colony",
+        "basuaghai",
+        "itipur",
+        "tikarapada",
+        "dhauli",
+        "sisupal"
+      ],
+      "probable_post_delimitation_keywords_needing_gis_validation": [
+        "old town",
+        "lingaraj",
+        "bindusagar",
+        "tankapani road",
+        "samantarapur",
+        "pokhariput",
+        "kapilaprasad",
+        "sundarpada",
+        "bhimatangi"
+      ],
+      "current_lok_sabha_member": {
+        "name": "Aparajita Sarangi",
+        "party_full": "Bharatiya Janata Party",
+        "party_short": "BJP",
+        "image_url": "https://myneta.info/images_candidate/mynetai_ews5LokSabha2024/9c8310e0aa8b91a75ea1a2d87deb406e1dbbb791.jpg"
+      }
+    },
+    {
+      "assembly_constituency_no": 115,
+      "assembly_constituency_code": "AC-115",
+      "assembly_constituency_name": "Jatani",
+      "type": "SLA",
+      "reservation": "None",
+      "state": "Odisha",
+      "district": "Khordha",
+      "division": "Central Division",
+      "established_year": 1974,
+      "latest_election_year": 2024,
+      "electors_2024": 247101,
+      "linked_lok_sabha_constituency": {
+        "name": "Bhubaneswar",
+        "number": 18
+      },
+      "mla_profile": {
+        "role": "Member of Legislative Assembly",
+        "name": "Bibhuti Bhusan Balabantaray",
+        "party_full": "Biju Janata Dal",
+        "party_short": "BJD",
+        "image_url": "https://myneta.info/images_candidate/mynetai_ews5Odisha2024/17feb801f7eb49f109603cd0a6f78dfc599aa1f8.jpg",
+        "profile_urls": {
+          "eci_result_page": "https://results.eci.gov.in/AcResultGenJune2024/ConstituencywiseS18115.htm",
+          "eci_candidatewise_page": "https://results.eci.gov.in/AcResultGenJune2024/candidateswise-S18115.htm",
+          "reference_page": "https://en.wikipedia.org/wiki/Jatani_Assembly_constituency",
+          "image_source_page": "https://myneta.info/Odisha2024/candidate.php?candidate_id=10"
+        },
+        "contacts": {
+          "email": null,
+          "phone": null,
+          "office_address": null
+        }
+      },
+      "election_2024": {
+        "winner_name": "Bibhuti Bhusan Balabantaray",
+        "winner_party_full": "Biju Janata Dal",
+        "winner_party_short": "BJD",
+        "winner_votes": 68162,
+        "winner_vote_share_percent": 39.06,
+        "victory_margin": 25221,
+        "runner_up_name": "Biswaranjan Badajena",
+        "runner_up_party_full": "Bharatiya Janata Party",
+        "runner_up_party_short": "BJP",
+        "runner_up_votes": 42941,
+        "total_votes_counted": 174518
+      },
+      "official_extent": {
+        "bmc_ward_based_match": false,
+        "gram_panchayats_of_bhubaneswar_block": [
+          "Chandaka",
+          "Darutheng",
+          "Andharua",
+          "Paikarapur",
+          "Mendhasal",
+          "Tamando",
+          "Nanput",
+          "Kantabad",
+          "Patrapada"
+        ],
+        "other_extent_markers": [
+          "Jatani Block",
+          "Jatani Municipality"
+        ]
+      },
+      "data_quality_note": "Uploaded extent preserved from your original file. Verify against latest authoritative boundary or GeoJSON data before production use.",
+      "match_keywords": [
+        "jatani",
+        "chandaka",
+        "darutheng",
+        "andharua",
+        "paikarapur",
+        "mendhasal",
+        "tamando",
+        "nanput",
+        "kantabad",
+        "patrapada",
+        "keranga",
+        "malipur",
+        "tangiapada",
+        "pubusahi",
+        "nalipada",
+        "arjunpur"
+      ],
+      "current_lok_sabha_member": {
+        "name": "Aparajita Sarangi",
+        "party_full": "Bharatiya Janata Party",
+        "party_short": "BJP",
+        "image_url": "https://myneta.info/images_candidate/mynetai_ews5LokSabha2024/9c8310e0aa8b91a75ea1a2d87deb406e1dbbb791.jpg"
+      }
+    }
+  ],
+  "ambiguous_keywords_require_secondary_check": [
+    {
+      "keyword": "nayapalli",
+      "reason": "Can fall under Central or Ekamra depending on exact sub-area or ward.",
+      "resolve_using": ["exact ward", "full address", "lat-long"]
+    },
+    {
+      "keyword": "niladri vihar",
+      "reason": "Sectors 1-2 align with North, while sectors 3-5 align with Ekamra.",
+      "resolve_using": ["sector number", "full address"]
+    },
+    {
+      "keyword": "baramunda",
+      "reason": "Baramunda/Barimunda names are often used loosely for different localities.",
+      "resolve_using": ["exact colony name", "ward", "pincode", "lat-long"]
+    },
+    {
+      "keyword": "patrapada",
+      "reason": "Best matched through GP or geospatial validation because urban expansion changed local references.",
+      "resolve_using": ["exact ward", "full address", "lat-long"]
+    }
+  ]
+}
