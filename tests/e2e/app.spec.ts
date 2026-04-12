@@ -9,6 +9,6 @@ test("public map shell loads", async ({ page }) => {
 
 test("admin login route loads", async ({ page }) => {
   await page.goto("/admin");
-  await expect(page.getByAltText("Kasa Moderator")).toBeVisible();
+  await expect(page.getByAltText("Moderator")).toBeVisible();
   await expect(page.getByPlaceholder("Admin key")).toBeVisible();
 });

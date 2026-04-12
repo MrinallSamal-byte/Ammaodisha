@@ -1,3 +1,5 @@
+/* eslint-env node */
+
 import fs from 'fs';
 
 const mp = {
@@ -85,5 +87,3 @@ for (let i = 1; i <= 67; i++) {
 }
 
 fs.writeFileSync("/home/mrinall-samal/Projects/Live Garbage 3/public/wards.json", JSON.stringify(wards, null, 2));
-
-console.log('JSON files generated successfully!');

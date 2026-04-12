@@ -95,6 +95,11 @@ button:disabled {
   overflow: hidden;
 }
 
+.maplibregl-ctrl-bottom-right,
+.maplibregl-ctrl-bottom-left {
+  bottom: calc(max(var(--safe-bottom), 8px) + 76px) !important;
+}
+
 .garbage-marker {
   display: block;
   padding: 0;
