@@ -276,7 +276,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
           <span>
             <strong>Amma Odisha</strong>{" "}
             Report, verify, and track ward accountability across Bhubaneswar. →{" "}
-            <a href="https://ammaodisha.in" target="_blank" rel="noreferrer"><strong>ammaodisha.in</strong></a>
+            <a href="https://ammaodisha.me" target="_blank" rel="noreferrer"><strong>ammaodisha.me</strong></a>
           </span>
           <button type="button" className="civic-dismiss" onClick={() => { localStorage.setItem("nk_civic_hidden", "1"); setShowCivicNotice(false); }} aria-label="Dismiss notice">
             <X size={14} />
@@ -1138,8 +1138,8 @@ function AboutSheet({ onClose }: { onClose: () => void }) {
           <a href="https://x.com/realmojojojo_" target="_blank" rel="noreferrer">
             Built by @realmojojojo_
           </a>
-          <a href="https://ammaodisha.in" target="_blank" rel="noreferrer">
-            ammaodisha.in
+          <a href="https://ammaodisha.me" target="_blank" rel="noreferrer">
+            ammaodisha.me
           </a>
         </div>
       </article>

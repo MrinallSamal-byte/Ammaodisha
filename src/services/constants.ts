@@ -5,7 +5,7 @@ export const CITY_ZOOM = 12;
 export const MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 export const BMC_WHATSAPP = "916742432100";
 
-export const PROD_HOSTNAMES = ["ammaodisha.vercel.app", "ammaodisha.in", "www.ammaodisha.in"];
+export const PROD_HOSTNAMES = ["ammaodisha.vercel.app", "ammaodisha.me", "www.ammaodisha.me"];
 export const IS_STAGING = typeof window !== "undefined" && !PROD_HOSTNAMES.includes(window.location.hostname);
 
 export const SEVERITY: Record<
