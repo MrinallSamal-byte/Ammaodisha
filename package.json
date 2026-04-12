@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
+    "check:supabase": "node scripts/check-supabase.mjs",
     "seed:pull": "node scripts/import-seed.mjs",
     "seed:supabase": "node scripts/seed-supabase.mjs"
   },

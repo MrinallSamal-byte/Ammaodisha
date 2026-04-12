@@ -7,7 +7,6 @@ import {
   ChevronDown,
   CircleAlert,
   Home,
-  Info,
   Layers,
   List,
   LoaderCircle,
@@ -416,14 +415,6 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
         />
       )}
     </div>
-  );
-}
-
-function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
-  return (
-    <button className="icon-button" onClick={onClick} aria-label={label}>
-      {children}
-    </button>
   );
 }
 
