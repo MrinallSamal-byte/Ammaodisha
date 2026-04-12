@@ -22,7 +22,7 @@ import {
   Trophy,
   X
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type TouchEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { MapView } from "./MapView";
 import { CHANGELOG, CATEGORIES, SEVERITY, STATUS_LABELS } from "../services/constants";
 import { backend } from "../services/backend";
@@ -54,6 +54,32 @@ interface PublicAppProps {
   navigate: (path: string) => void;
 }
 
+function normalizeWardText(value?: string | null) {
+  return (value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function getDistinctWardName(ward?: Pick<Ward, "ward_number" | "ward_name"> | null) {
+  if (!ward) return "";
+
+  const wardName = ward.ward_name?.trim() || "";
+  if (!wardName) return "";
+
+  const normalized = normalizeWardText(wardName);
+  const match = normalized.match(/^ward(?:\s+no\.?)?[\s#:-]*0*(\d+)$/);
+  if (match && Number(match[1]) === ward.ward_number) {
+    return "";
+  }
+  return wardName;
+}
+
+function getWardSelectLabel(ward: Ward) {
+  const distinctName = getDistinctWardName(ward);
+  return distinctName ? `Ward ${ward.ward_number} - ${distinctName}` : `Ward ${ward.ward_number}`;
+}
+
 export function PublicApp({ data, routeSelection, onDataChange, navigate }: PublicAppProps) {
   const [reports, setReports] = useState(data.reports);
   const [selectedReport, setSelectedReport] = useState<GarbageReport | null>(null);
@@ -65,6 +91,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   const [wardFilterNumber, setWardFilterNumber] = useState<number | null>(null);
   const [wardFilterState, setWardFilterState] = useState<"idle" | "locating" | "error">("idle");
   const [showReportForm, setShowReportForm] = useState(false);
+  const [showInsights, setShowInsights] = useState(false);
   const [showIntro, setShowIntro] = useState(() => localStorage.getItem("nk_intro_seen") !== "1");
   const [showAbout, setShowAbout] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
@@ -226,8 +253,12 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
       />
 
       <header className="topbar safe-top">
-        <button className="brand-chip" onClick={() => navigate("/")} aria-label="Go to map">
+        <button className="brand-chip" onClick={() => navigate("/")} aria-label="Go to Amma Odisha map">
           <img src="/logo.png" alt="Amma Odisha" />
+          <span>
+            <strong>Amma Odisha</strong>
+            <small>Bhubaneswar civic map</small>
+          </span>
         </button>
         <div className="topbar-actions">
           <IconButton label="About Amma Odisha" onClick={() => setShowAbout(true)}>
@@ -239,10 +270,70 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
         </div>
       </header>
 
-      <div className="map-mode-toggle">
-        <SegmentedButton active={viewMode === "map"} onClick={() => setViewMode("map")} icon={<MapIcon size={14} />} label="Map" />
-        <SegmentedButton active={viewMode === "list"} onClick={() => setViewMode("list")} icon={<List size={14} />} label="List" />
-      </div>
+      <section className="civic-notice" aria-label="Amma Odisha civic reporting context">
+        <Sparkles size={15} />
+        <span>
+          <strong>Public garbage map</strong>{" "}
+          Report, verify, and track ward accountability across Bhubaneswar.
+        </span>
+        <button type="button" onClick={() => setShowAbout(true)}>
+          How it works
+        </button>
+      </section>
+
+      <section className="control-dock" aria-label="Filter reports">
+        <div className="control-grid">
+          <select value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value as "all" | SeverityKey)} aria-label="Filter by severity">
+            <option value="all">All Severity</option>
+            {Object.entries(SEVERITY).map(([key, value]) => (
+              <option value={key} key={key}>
+                {value.label}
+              </option>
+            ))}
+          </select>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | "unresolved" | "resolved")} aria-label="Filter by status">
+            <option value="all">All Status</option>
+            <option value="unresolved">Unresolved</option>
+            <option value="resolved">Cleaned</option>
+          </select>
+          <input
+            className="search-control"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search locality, ward, landmark"
+            aria-label="Search reports"
+          />
+          <select
+            className="sort-control"
+            value={sortBy}
+            onChange={(event) => setSortBy(event.target.value as "newest" | "upvotes" | "oldest")}
+            aria-label="Sort reports"
+          >
+            <option value="newest">Newest</option>
+            <option value="upvotes">Most Upvoted</option>
+            <option value="oldest">Oldest</option>
+          </select>
+        </div>
+        <div className="map-mode-toggle">
+          <SegmentedButton active={viewMode === "map"} onClick={() => setViewMode("map")} icon={<MapIcon size={14} />} label="Map" />
+          <SegmentedButton active={viewMode === "list"} onClick={() => setViewMode("list")} icon={<List size={14} />} label="List" />
+        </div>
+        <div className="quick-actions-row">
+          <button className={clsx("chip-button", wardFilterNumber != null && "is-active")} onClick={detectAndFilterMyWard} type="button">
+            {wardFilterState === "locating" ? <LoaderCircle className="spin" size={14} /> : <Layers size={14} />}
+            {wardFilterNumber != null ? `Ward ${wardFilterNumber}` : "Use My Ward"}
+          </button>
+          <button className="chip-button" onClick={clearFilters} type="button">
+            <X size={14} />
+            Clear
+          </button>
+          <button className="chip-button refresh-chip" onClick={refreshReports} type="button">
+            <RefreshCw size={14} />
+            Refresh
+          </button>
+        </div>
+        {wardFilterState === "error" && <p className="control-error">Could not detect your location inside Bhubaneswar. You can still filter manually.</p>}
+      </section>
 
       {viewMode === "list" && (
         <div className="list-overlay">
@@ -256,112 +347,41 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
         <Stat label="Resolved" value={resolved.length} tone="green" />
       </section>
 
-      <BottomSheet forceCollapsed={viewMode === "list"}>
-        <div className="sheet-block">
-          <div className="sheet-title-row">
-            <div>
-              <p className="eyebrow">Bhubaneswar (BMC)</p>
-              <h1>Garbage Report</h1>
-            </div>
-            <button className="tiny-action" onClick={refreshReports}>
-              <RefreshCw size={13} />
-              Refresh
-            </button>
-          </div>
-          <p className="muted">Report it. Photograph it. Track who is responsible.</p>
-        </div>
-
-        <div className="filter-row">
-          <select value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value as "all" | SeverityKey)}>
-            <option value="all">All Severity</option>
-            {Object.entries(SEVERITY).map(([key, value]) => (
-              <option value={key} key={key}>
-                {value.label}
-              </option>
-            ))}
-          </select>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | "unresolved" | "resolved")}>
-            <option value="all">All Status</option>
-            <option value="unresolved">Unresolved</option>
-            <option value="resolved">Cleaned</option>
-          </select>
-        </div>
-
-        <div className="filter-row">
-          <input
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search by locality, ward, or landmark"
-            aria-label="Search reports"
-          />
-          <select value={sortBy} onChange={(event) => setSortBy(event.target.value as "newest" | "upvotes" | "oldest")}>
-            <option value="newest">Newest First</option>
-            <option value="upvotes">Most Upvoted</option>
-            <option value="oldest">Oldest First</option>
-          </select>
-        </div>
-
-        <div className="quick-actions-row">
-          <button className={clsx("chip-button", wardFilterNumber != null && "is-active")} onClick={detectAndFilterMyWard} type="button">
-            {wardFilterState === "locating" ? <LoaderCircle className="spin" size={14} /> : <Layers size={14} />}
-            {wardFilterNumber != null ? `My Ward: ${wardFilterNumber}` : "Use My Ward"}
-          </button>
-          <button className="chip-button" onClick={clearFilters} type="button">
-            <X size={14} />
-            Clear Filters
-          </button>
-        </div>
-
-        <p className="muted">
-          Showing {visibleReports.length} reports{filteredWard ? ` in Ward ${filteredWard.ward_number}` : ""}.
-        </p>
-        {wardFilterState === "error" && <p className="warning-text">Could not detect your location inside Bhubaneswar. You can still filter manually.</p>}
-
+      <footer className="bottom-action-bar safe-bottom">
         <button className="primary-cta" onClick={() => setShowReportForm(true)}>
-          <Plus size={18} />
+          <Plus size={19} />
           Report Garbage
         </button>
-
-        <div className="leaderboard">
-          <div className="sheet-title-row compact">
-            <h2>Worst Wards by Reports</h2>
-            <Trophy size={16} />
-          </div>
-          {worstWards.length ? (
-            worstWards.slice(0, 5).map((item, index) => (
-              <button
-                className="ward-row"
-                key={item.ward.ward_number}
-                onClick={() => {
-                  focusWardOnMap(item.ward.ward_number);
-                  setSelectedProfile({ type: "ward", id: String(item.ward.ward_number) });
-                  navigate(`/ward/${item.ward.ward_number}`);
-                }}
-              >
-                <span className="rank">{index + 1}</span>
-                <span>
-                  <strong>Ward {item.ward.ward_number}</strong>
-                  <small>{item.ward.ward_name}</small>
-                </span>
-                <b>{item.count}</b>
-              </button>
-            ))
-          ) : (
-            <p className="empty">No reports yet. Be the first!</p>
-          )}
-        </div>
-      </BottomSheet>
-
-      <button className="floating-report" onClick={() => setShowReportForm(true)}>
-        <Camera size={18} />
-        Report
-      </button>
-
-      <TelegramToast />
+        <button className="insights-button" type="button" onClick={() => setShowInsights(true)} aria-label="Open Amma Odisha insights">
+          <Trophy size={18} />
+          <span>
+            <strong>{visibleReports.length}</strong>
+            <small>Insights</small>
+          </span>
+        </button>
+      </footer>
 
       {showIntro && <IntroOverlay onClose={dismissIntro} />}
       {showAbout && <AboutSheet onClose={() => setShowAbout(false)} />}
       {showChangelog && <ChangelogSheet onClose={() => setShowChangelog(false)} />}
+      {showInsights && (
+        <InsightsSheet
+          reports={reports}
+          visibleReports={visibleReports}
+          filteredWardNumber={filteredWard?.ward_number ?? null}
+          unresolvedCount={unresolved.length}
+          resolvedCount={resolved.length}
+          worstWards={worstWards}
+          onClose={() => setShowInsights(false)}
+          onOpenWard={(wardNumber) => {
+            setShowInsights(false);
+            focusWardOnMap(wardNumber);
+            setSelectedProfile({ type: "ward", id: String(wardNumber) });
+            navigate(`/ward/${wardNumber}`);
+          }}
+        />
+      )}
+      {!showIntro && !showReportForm && !selectedReport && !selectedProfile && !showInsights && <TelegramToast />}
       {showReportForm && <ReportForm data={data} onClose={() => setShowReportForm(false)} onSubmit={onSubmitted} />}
       {selectedReport && (
         <ReportDetail
@@ -398,84 +418,6 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   );
 }
 
-function BottomSheet({ children, forceCollapsed = false }: { children: ReactNode; forceCollapsed?: boolean }) {
-  const [isMobile, setIsMobile] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.matchMedia("(max-width: 719px)").matches;
-  });
-  const [collapsed, setCollapsed] = useState(false);
-  const touchStartY = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const media = window.matchMedia("(max-width: 719px)");
-    const onChange = () => {
-      const nextIsMobile = media.matches;
-      setIsMobile(nextIsMobile);
-      if (!nextIsMobile) setCollapsed(false);
-    };
-
-    onChange();
-    if (typeof media.addEventListener === "function") {
-      media.addEventListener("change", onChange);
-      return () => media.removeEventListener("change", onChange);
-    }
-
-    media.addListener(onChange);
-    return () => media.removeListener(onChange);
-  }, []);
-
-  useEffect(() => {
-    if (!isMobile) return;
-    setCollapsed(forceCollapsed);
-  }, [forceCollapsed, isMobile]);
-
-  const toggleCollapsed = () => {
-    if (!isMobile) return;
-    setCollapsed((value) => !value);
-  };
-
-  const onHandleTouchStart = (event: TouchEvent<HTMLButtonElement>) => {
-    touchStartY.current = event.touches[0]?.clientY ?? null;
-  };
-
-  const onHandleTouchEnd = (event: TouchEvent<HTMLButtonElement>) => {
-    if (!isMobile || touchStartY.current === null) return;
-    const endY = event.changedTouches[0]?.clientY ?? touchStartY.current;
-    const delta = endY - touchStartY.current;
-    touchStartY.current = null;
-
-    if (Math.abs(delta) < 14) {
-      toggleCollapsed();
-      return;
-    }
-
-    if (delta > 0) {
-      setCollapsed(true);
-      return;
-    }
-
-    setCollapsed(false);
-  };
-
-  return (
-    <aside className={clsx("bottom-sheet safe-bottom", isMobile && "is-mobile", collapsed && "is-collapsed")}>
-      <button
-        className="sheet-handle-button"
-        type="button"
-        onClick={toggleCollapsed}
-        onTouchStart={onHandleTouchStart}
-        onTouchEnd={onHandleTouchEnd}
-        aria-label={collapsed ? "Expand panel" : "Collapse panel"}
-      >
-        <span className="sheet-handle" />
-        {isMobile && <span className="sheet-handle-label">{collapsed ? "Swipe up to open panel" : "Swipe down to see more map"}</span>}
-      </button>
-      <div className="sheet-content">{children}</div>
-    </aside>
-  );
-}
-
 function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
   return (
     <button className="icon-button" onClick={onClick} aria-label={label}>
@@ -502,19 +444,102 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: stri
   );
 }
 
+function InsightsSheet({
+  reports,
+  visibleReports,
+  filteredWardNumber,
+  unresolvedCount,
+  resolvedCount,
+  worstWards,
+  onClose,
+  onOpenWard
+}: {
+  reports: GarbageReport[];
+  visibleReports: GarbageReport[];
+  filteredWardNumber: number | null;
+  unresolvedCount: number;
+  resolvedCount: number;
+  worstWards: ReturnType<typeof getWorstWards>;
+  onClose: () => void;
+  onOpenWard: (wardNumber: number) => void;
+}) {
+  const activeShare = Math.round((unresolvedCount / Math.max(1, reports.length)) * 100);
+
+  return (
+    <div className="modal-layer" onMouseDown={onClose}>
+      <article className="insights-sheet" onMouseDown={(event) => event.stopPropagation()}>
+        <button className="close-button" onClick={onClose} aria-label="Close insights">
+          <X size={18} />
+        </button>
+        <div className="sheet-handle" aria-hidden="true" />
+        <div className="sheet-title-row">
+          <div>
+            <p className="eyebrow">Public Accountability</p>
+            <h2>Citywide report pulse</h2>
+          </div>
+          <Trophy size={20} />
+        </div>
+        <p className="muted">
+          Showing {visibleReports.length} reports{filteredWardNumber ? ` in Ward ${filteredWardNumber}` : ""}. Every report is mapped to a ward and linked to civic accountability.
+        </p>
+
+        <div className="metric-grid insights-metrics">
+          <Metric label="active reports" value={unresolvedCount} />
+          <Metric label="resolved" value={resolvedCount} />
+          <Metric label="still open" value={`${activeShare}%`} />
+        </div>
+
+        <div className="accountability-card">
+          <h3>How pressure builds</h3>
+          <p>Citizens report a spot, others upvote it, and the issue stays visible with ward, MLA, and MP context until it is cleaned.</p>
+        </div>
+
+        <div className="leaderboard">
+          <div className="sheet-title-row compact">
+            <h3>Worst Wards by Active Reports</h3>
+            <span className="pill red">{worstWards.length} wards</span>
+          </div>
+          {worstWards.length ? (
+            worstWards.slice(0, 6).map((item, index) => {
+              const wardName = getDistinctWardName(item.ward);
+              return (
+                <button className="ward-row" key={item.ward.ward_number} onClick={() => onOpenWard(item.ward.ward_number)}>
+                  <span className="rank">{index + 1}</span>
+                  <span>
+                    <strong>Ward {item.ward.ward_number}</strong>
+                    {wardName ? <small>{wardName}</small> : <small>Bhubaneswar</small>}
+                  </span>
+                  <b>{item.count}</b>
+                </button>
+              );
+            })
+          ) : (
+            <p className="empty">No active ward hotspots right now.</p>
+          )}
+        </div>
+      </article>
+    </div>
+  );
+}
+
 function IntroOverlay({ onClose }: { onClose: () => void }) {
   return (
-    <button className="intro-overlay" onClick={onClose}>
+    <aside className="intro-nudge" role="dialog" aria-label="Amma Odisha intro">
+      <button className="toast-close" onClick={onClose} aria-label="Dismiss intro">
+        <X size={12} />
+      </button>
       <div className="intro-card">
         <img src="/logo.png" alt="" />
-        <p className="eyebrow">v0.3.0</p>
-        <h2>Bhubaneswar has a garbage problem.</h2>
+        <p className="eyebrow">Bhubaneswar (BMC)</p>
+        <h2>Garbage reports, mapped in public.</h2>
         <p>Report it. Photograph it. Track who is responsible.</p>
-        <small>Every dump is mapped to the responsible ward, MLA, and MP. When enough citizens report, it becomes impossible to ignore.</small>
+        <small>Every dump is linked to a ward, MLA, and MP so cleanup pressure stays visible.</small>
         <b>67 wards · 4 MLAs · 1 MP · All of Bhubaneswar</b>
-        <span>Tap anywhere to continue</span>
+        <button className="secondary-cta" onClick={onClose}>
+          Start using map
+        </button>
       </div>
-    </button>
+    </aside>
   );
 }
 
@@ -529,6 +554,13 @@ function ReportList({
 }) {
   return (
     <div className="report-list">
+      <div className="report-list-header">
+        <div>
+          <p className="eyebrow">Live Reports</p>
+          <h2>{reports.length} visible issues</h2>
+        </div>
+        <span className="pill red">Public</span>
+      </div>
       {reports.length ? (
         reports.map((report) => (
           <ReportListItem key={report.id} report={report} ward={wards.find((ward) => ward.ward_number === report.ward_number)} onSelect={onSelect} />
@@ -550,13 +582,15 @@ function ReportListItem({
   onSelect: (report: GarbageReport) => void;
 }) {
   const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
+  const wardName = getDistinctWardName(ward);
   return (
     <button className="report-item" onClick={() => onSelect(report)}>
       {report.photo_url ? <img src={report.photo_url} alt="" /> : <span className="photo-placeholder">No Photo</span>}
       <span className="report-item-body">
         <strong>{report.address}</strong>
         <small>
-          Ward #{report.ward_number} {ward ? `· ${ward.ward_name}` : ""} · {timeAgo(report.created_at)}
+          Ward #{report.ward_number}
+          {wardName ? ` · ${wardName}` : ""} · {timeAgo(report.created_at)}
         </small>
         <em style={{ color: severity.color }}>{severity.label}</em>
       </span>
@@ -599,6 +633,7 @@ function ReportDetail({
   }, [report.id]);
 
   const ward = data.wards.find((item) => item.ward_number === report.ward_number);
+  const wardName = getDistinctWardName(ward);
   const mla = data.representatives.find((rep) => rep.role === "mla" && rep.constituency === ward?.assembly_constituency);
   const mp = data.representatives.find((rep) => rep.role === "mp" && rep.constituency === ward?.parliamentary_constituency);
   const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
@@ -632,7 +667,7 @@ function ReportDetail({
   const complaint = () => {
     const text = generateBMCComplaint({
       address: report.address,
-      wardName: ward?.ward_name ?? "Unknown",
+      wardName: wardName || "Bhubaneswar",
       wardNumber: ward?.ward_number ?? "?",
       severity: report.severity,
       category: report.category,
@@ -663,7 +698,8 @@ function ReportDetail({
           </div>
           <h2>{report.address}</h2>
           <p>
-            Ward #{report.ward_number} {ward ? `— ${ward.ward_name}` : ""} · {daysActive(report.created_at)} Days
+            Ward #{report.ward_number}
+            {wardName ? ` - ${wardName}` : ""} · {daysActive(report.created_at)} Days
           </p>
 
           <div className="metric-grid">
@@ -698,7 +734,7 @@ function ReportDetail({
             {report.status !== "resolved" && (
               <button onClick={() => setShowResolve(true)} className="green-action">
                 <CheckCircle2 size={16} />
-                It is Cleaned Up — Verify
+                It is Cleaned Up - Verify
               </button>
             )}
           </div>
@@ -901,8 +937,9 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
           <div>
             <p className="eyebrow">Garbage Report</p>
             <h2>Report Garbage</h2>
+            <p>Take a photo, confirm the ward, and add a landmark citizens can recognize.</p>
           </div>
-          <button className="close-button" onClick={onClose}>
+          <button className="close-button" onClick={onClose} aria-label="Close report form">
             <X size={18} />
           </button>
         </div>
@@ -941,20 +978,26 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
             <option value="">Select Ward...</option>
             {data.wards.map((ward) => (
               <option key={ward.ward_number} value={ward.ward_number}>
-                Ward {ward.ward_number} — {ward.ward_name}
+                {getWardSelectLabel(ward)}
               </option>
             ))}
           </select>
           <button className="tiny-action" onClick={detectWard} type="button">
             {locationState === "locating" || locationState === "detecting" ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
-            {locationState === "detected" ? "Re-detect" : locationState === "detecting" ? "Detecting ward..." : "Ward Detected"}
+            {locationState === "detected"
+              ? `Detected Ward ${selectedWard?.ward_number ?? ""}`
+              : locationState === "detecting"
+                ? "Detecting ward..."
+                : locationState === "locating"
+                  ? "Finding location..."
+                  : "Use current location"}
           </button>
         </label>
         <label className="field">
           <span>
             Landmark / Address <b>*</b>
           </span>
-          <input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="e.g., Near 5th Cross, opposite Reliance Fresh" />
+          <input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="e.g., Near Unit 4 market, beside the temple" />
           <small>Please add a landmark or address so others can find this spot.</small>
         </label>
         <label className="field">
@@ -979,14 +1022,16 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
             ))}
           </select>
         </label>
-        {error && <p className="warning-text">{error}</p>}
-        <button className="primary-cta" onClick={submit} disabled={submitting}>
-          {submitting ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
-          {submitting ? "Submitting..." : "Report Garbage"}
-        </button>
-        <p className="anonymous">
-          <ShieldCheck size={13} /> All reports are anonymous
-        </p>
+        <div className="form-footer">
+          {error && <p className="warning-text">{error}</p>}
+          <button className="primary-cta" onClick={submit} disabled={submitting}>
+            {submitting ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
+            {submitting ? "Submitting..." : "Report Garbage"}
+          </button>
+          <p className="anonymous">
+            <ShieldCheck size={13} /> All reports are anonymous
+          </p>
+        </div>
       </article>
     </div>
   );
@@ -1015,6 +1060,7 @@ function ProfileSheet({
     return itemWard?.parliamentary_constituency === rep?.constituency;
   });
   const activeReports = profileReports.filter((report) => report.status !== "resolved");
+  const wardName = getDistinctWardName(ward);
 
   return (
     <div className="modal-layer" onMouseDown={onClose}>
@@ -1027,7 +1073,7 @@ function ProfileSheet({
           <div>
             <p className="eyebrow">{isWard ? "Ward Profile" : selection.type.toUpperCase()}</p>
             <h2>{ward ? `Ward ${ward.ward_number}` : rep?.name}</h2>
-            <p>{ward ? ward.ward_name : `${rep?.party} · ${rep?.constituency}`}</p>
+            <p>{ward ? wardName || "Bhubaneswar" : `${rep?.party} · ${rep?.constituency}`}</p>
           </div>
         </div>
         <div className="metric-grid">

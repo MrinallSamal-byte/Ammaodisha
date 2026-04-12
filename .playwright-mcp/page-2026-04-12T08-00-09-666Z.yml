@@ -1,0 +1,366 @@
+- generic [ref=e3]:
+  - generic [ref=e6]:
+    - generic [ref=e7]:
+      - img "NammaKasa" [ref=e9] [cursor=pointer]
+      - button "v0.3.0" [ref=e10] [cursor=pointer]
+    - button [ref=e12] [cursor=pointer]:
+      - img [ref=e14]
+  - generic [ref=e16]:
+    - generic [ref=e17]:
+      - generic [ref=e18]: 🏠
+      - paragraph [ref=e19]:
+        - text: NammaKasa has a new home →
+        - link "nammakasa.in" [ref=e20] [cursor=pointer]:
+          - /url: https://nammakasa.in
+    - button [ref=e21] [cursor=pointer]:
+      - img [ref=e22]
+  - generic [ref=e25]:
+    - generic [ref=e27] [cursor=pointer]:
+      - generic [ref=e28]: All Severity
+      - img [ref=e29]
+    - generic [ref=e32] [cursor=pointer]:
+      - generic [ref=e33]: All Status
+      - img [ref=e34]
+    - generic [ref=e36]:
+      - button "Map" [ref=e37] [cursor=pointer]
+      - button "List" [ref=e38] [cursor=pointer]
+  - generic [ref=e41]:
+    - generic [ref=e42]:
+      - generic:
+        - region "Map" [ref=e43]
+        - generic "Map marker" [ref=e44]
+        - generic "Map marker" [ref=e48]
+        - generic "Map marker" [ref=e51]
+        - generic "Map marker" [ref=e54]
+        - generic "Map marker" [ref=e58]
+        - generic "Map marker" [ref=e62]
+        - generic "Map marker" [ref=e66]
+        - generic "Map marker" [ref=e69]
+        - generic "Map marker" [ref=e72]
+        - generic "Map marker" [ref=e75]
+        - generic "Map marker" [ref=e79]
+        - generic "Map marker" [ref=e83]
+        - generic "Map marker" [ref=e86]
+        - generic "Map marker" [ref=e90]
+        - generic "Map marker" [ref=e94]
+        - generic "Map marker" [ref=e98]
+        - generic "Map marker" [ref=e102]
+        - generic "Map marker" [ref=e106]
+        - generic "Map marker" [ref=e110]
+        - generic "Map marker" [ref=e114]
+        - generic "Map marker" [ref=e117]
+        - generic "Map marker" [ref=e121]
+        - generic "Map marker" [ref=e124]
+        - generic "Map marker" [ref=e127]
+        - generic "Map marker" [ref=e131]
+        - generic "Map marker" [ref=e135]
+        - generic "Map marker" [ref=e138]
+        - generic "Map marker" [ref=e141]
+        - generic "Map marker" [ref=e144]
+        - generic "Map marker" [ref=e148]
+        - generic "Map marker" [ref=e152]
+        - generic "Map marker" [ref=e156]
+        - generic "Map marker" [ref=e159]
+        - generic "Map marker" [ref=e162]
+        - generic "Map marker" [ref=e165]
+        - generic "Map marker" [ref=e169]
+        - generic "Map marker" [ref=e172]
+        - generic "Map marker" [ref=e175]
+        - generic "Map marker" [ref=e178]
+        - generic "Map marker" [ref=e182]
+        - generic "Map marker" [ref=e186]
+        - generic "Map marker" [ref=e189]
+        - generic "Map marker" [ref=e193]
+        - generic "Map marker" [ref=e196]
+        - generic "Map marker" [ref=e200]
+        - generic "Map marker" [ref=e204]
+        - generic "Map marker" [ref=e207]
+        - generic "Map marker" [ref=e211]
+        - generic "Map marker" [ref=e215]
+        - generic "Map marker" [ref=e218]
+        - generic "Map marker" [ref=e221]
+        - generic "Map marker" [ref=e224]
+        - generic "Map marker" [ref=e227]
+        - generic "Map marker" [ref=e230]
+        - generic "Map marker" [ref=e234]
+        - generic "Map marker" [ref=e237]
+        - generic "Map marker" [ref=e240]
+        - generic "Map marker" [ref=e243]
+        - generic "Map marker" [ref=e246]
+        - generic "Map marker" [ref=e250]
+        - generic "Map marker" [ref=e253]
+        - generic "Map marker" [ref=e257]
+        - generic "Map marker" [ref=e261]
+        - generic "Map marker" [ref=e264]
+        - generic "Map marker" [ref=e268]
+        - generic "Map marker" [ref=e271]
+        - generic "Map marker" [ref=e274]
+        - generic "Map marker" [ref=e277]
+        - generic "Map marker" [ref=e281]
+        - generic "Map marker" [ref=e285]
+        - generic "Map marker" [ref=e289]
+        - generic "Map marker" [ref=e292]
+        - generic "Map marker" [ref=e296]
+        - generic "Map marker" [ref=e300]
+        - generic "Map marker" [ref=e304]
+        - generic "Map marker" [ref=e308]
+        - generic "Map marker" [ref=e311]
+        - generic "Map marker" [ref=e315]
+        - generic "Map marker" [ref=e318]
+        - generic "Map marker" [ref=e321]
+        - generic "Map marker" [ref=e325]
+        - generic "Map marker" [ref=e329]
+        - generic "Map marker" [ref=e332]
+        - generic "Map marker" [ref=e336]
+        - generic "Map marker" [ref=e340]
+        - generic "Map marker" [ref=e344]
+        - generic "Map marker" [ref=e347]
+        - generic "Map marker" [ref=e351]
+        - generic "Map marker" [ref=e354]
+        - generic "Map marker" [ref=e357]
+        - generic "Map marker" [ref=e361]
+        - generic "Map marker" [ref=e365]
+        - generic "Map marker" [ref=e368]
+        - generic "Map marker" [ref=e372]
+        - generic "Map marker" [ref=e375]
+        - generic "Map marker" [ref=e379]
+        - generic "Map marker" [ref=e382]
+        - generic "Map marker" [ref=e386]
+        - generic "Map marker" [ref=e390]
+        - generic "Map marker" [ref=e393]
+        - generic "Map marker" [ref=e396]
+        - generic "Map marker" [ref=e400]
+        - generic "Map marker" [ref=e404]
+        - generic "Map marker" [ref=e407]
+        - generic "Map marker" [ref=e411]
+        - generic "Map marker" [ref=e415]
+        - generic "Map marker" [ref=e419]
+        - generic "Map marker" [ref=e422]
+        - generic "Map marker" [ref=e425]
+        - generic "Map marker" [ref=e429]
+        - generic "Map marker" [ref=e432]
+        - generic "Map marker" [ref=e436]
+        - generic "Map marker" [ref=e439]
+        - generic "Map marker" [ref=e443]
+        - generic "Map marker" [ref=e446]
+        - generic "Map marker" [ref=e450]
+        - generic "Map marker" [ref=e454]
+        - generic "Map marker" [ref=e458]
+        - generic "Map marker" [ref=e462]
+        - generic "Map marker" [ref=e466]
+        - generic "Map marker" [ref=e469]
+        - generic "Map marker" [ref=e472]
+        - generic "Map marker" [ref=e476]
+        - generic "Map marker" [ref=e479]
+        - generic "Map marker" [ref=e483]
+        - generic "Map marker" [ref=e487]
+        - generic "Map marker" [ref=e491]
+        - generic "Map marker" [ref=e495]
+        - generic "Map marker" [ref=e498]
+        - generic "Map marker" [ref=e502]
+        - generic "Map marker" [ref=e505]
+        - generic "Map marker" [ref=e508]
+        - generic "Map marker" [ref=e511]
+        - generic "Map marker" [ref=e514]
+        - generic "Map marker" [ref=e517]
+        - generic "Map marker" [ref=e521]
+        - generic "Map marker" [ref=e525]
+        - generic "Map marker" [ref=e529]
+        - generic "Map marker" [ref=e533]
+        - generic "Map marker" [ref=e537]
+        - generic "Map marker" [ref=e540]
+        - generic "Map marker" [ref=e544]
+        - generic "Map marker" [ref=e547]
+        - generic "Map marker" [ref=e551]
+        - generic "Map marker" [ref=e555]
+        - generic "Map marker" [ref=e558]
+        - generic "Map marker" [ref=e562]
+        - generic "Map marker" [ref=e566]
+        - generic "Map marker" [ref=e569]
+        - generic "Map marker" [ref=e573]
+        - generic "Map marker" [ref=e577]
+        - generic "Map marker" [ref=e581]
+        - generic "Map marker" [ref=e585]
+        - generic "Map marker" [ref=e589]
+        - generic "Map marker" [ref=e592]
+        - generic "Map marker" [ref=e596]
+        - generic "Map marker" [ref=e599]
+        - generic "Map marker" [ref=e602]
+        - generic "Map marker" [ref=e606]
+        - generic "Map marker" [ref=e609]
+        - generic "Map marker" [ref=e612]
+        - generic "Map marker" [ref=e615]
+        - generic "Map marker" [ref=e619]
+        - generic "Map marker" [ref=e623]
+        - generic "Map marker" [ref=e627]
+        - generic "Map marker" [ref=e631]
+        - generic "Map marker" [ref=e635]
+        - generic "Map marker" [ref=e639]
+        - generic "Map marker" [ref=e642]
+        - generic "Map marker" [ref=e646]
+        - generic "Map marker" [ref=e649]
+        - generic "Map marker" [ref=e653]
+        - generic "Map marker" [ref=e657]
+        - generic "Map marker" [ref=e660]
+        - generic "Map marker" [ref=e664]
+        - generic "Map marker" [ref=e668]
+        - generic "Map marker" [ref=e672]
+        - generic "Map marker" [ref=e676]
+        - generic "Map marker" [ref=e679]
+        - generic "Map marker" [ref=e683]
+        - generic "Map marker" [ref=e686]
+        - generic "Map marker" [ref=e690]
+        - generic "Map marker" [ref=e694]
+        - generic "Map marker" [ref=e697]
+        - generic "Map marker" [ref=e700]
+        - generic "Map marker" [ref=e703]
+        - generic "Map marker" [ref=e707]
+        - generic "Map marker" [ref=e710]
+        - generic "Map marker" [ref=e714]
+        - generic "Map marker" [ref=e718]
+        - generic "Map marker" [ref=e722]
+        - generic "Map marker" [ref=e726]
+        - generic "Map marker" [ref=e730]
+        - generic "Map marker" [ref=e734]
+        - generic "Map marker" [ref=e738]
+        - generic "Map marker" [ref=e742]
+        - generic "Map marker" [ref=e745]
+        - generic "Map marker" [ref=e749]
+        - generic "Map marker" [ref=e753]
+        - generic "Map marker" [ref=e757]
+        - generic "Map marker" [ref=e761]
+        - generic "Map marker" [ref=e765]
+        - generic "Map marker" [ref=e769]
+        - generic "Map marker" [ref=e773]
+        - generic "Map marker" [ref=e777]
+        - generic "Map marker" [ref=e781]
+        - generic "Map marker" [ref=e785]
+        - generic "Map marker" [ref=e789]
+        - generic "Map marker" [ref=e793]
+        - generic "Map marker" [ref=e797]
+        - generic "Map marker" [ref=e800]
+        - generic "Map marker" [ref=e803]
+        - generic "Map marker" [ref=e807]
+        - generic "Map marker" [ref=e810]
+        - generic "Map marker" [ref=e814]
+        - generic "Map marker" [ref=e818]
+        - generic "Map marker" [ref=e822]
+        - generic "Map marker" [ref=e826]
+        - generic "Map marker" [ref=e829]
+        - generic "Map marker" [ref=e832]
+        - generic "Map marker" [ref=e835]
+        - generic "Map marker" [ref=e838]
+        - generic "Map marker" [ref=e841]
+        - generic "Map marker" [ref=e844]
+        - generic "Map marker" [ref=e848]
+        - generic "Map marker" [ref=e851]
+        - generic "Map marker" [ref=e854]
+        - generic "Map marker" [ref=e857]
+        - generic "Map marker" [ref=e860]
+        - generic "Map marker" [ref=e863]
+        - generic "Map marker" [ref=e866]
+        - generic "Map marker" [ref=e870]
+        - generic "Map marker" [ref=e873]
+      - generic:
+        - generic:
+          - button "Find my location" [ref=e877] [cursor=pointer]
+          - generic [ref=e879]:
+            - button "Zoom in" [ref=e880] [cursor=pointer]
+            - button "Zoom out" [ref=e882] [cursor=pointer]
+          - group [ref=e884]:
+            - generic [ref=e885]:
+              - link "MapLibre" [ref=e886] [cursor=pointer]:
+                - /url: https://maplibre.org/
+              - text: "| ©"
+              - link "CARTO" [ref=e887] [cursor=pointer]:
+                - /url: https://carto.com/about-carto/
+              - text: ", ©"
+              - link "OpenStreetMap" [ref=e888] [cursor=pointer]:
+                - /url: http://www.openstreetmap.org/about/
+              - text: contributors
+      - generic [ref=e928]:
+        - generic [ref=e929]: Sampangiram Nagar
+        - generic [ref=e930]: "Ward #129 · South"
+        - generic [ref=e931]: Shantinagar
+        - generic [ref=e932]: 1 report
+    - generic [ref=e890]:
+      - generic [ref=e891]:
+        - generic [ref=e892]: "231"
+        - generic [ref=e893]: Active
+      - generic [ref=e895]:
+        - generic [ref=e896]: "233"
+        - generic [ref=e897]: Reports
+  - generic [ref=e899]:
+    - button "Report Garbage" [ref=e900] [cursor=pointer]:
+      - img [ref=e901]
+      - text: Report Garbage
+    - button "231" [ref=e902] [cursor=pointer]:
+      - img [ref=e903]
+      - generic [ref=e905]: "231"
+  - generic [ref=e934]:
+    - generic [ref=e937]:
+      - generic [ref=e938]:
+        - generic [ref=e939]:
+          - generic [ref=e941]: Severe
+          - generic [ref=e942]: Unresolved
+        - heading "Sampangiram Nagar" [level=2] [ref=e943]
+        - paragraph [ref=e944]:
+          - img [ref=e945]
+          - generic [ref=e948]: High court parking lot
+      - generic [ref=e949]:
+        - button [ref=e950] [cursor=pointer]:
+          - img [ref=e951]
+        - button [ref=e957] [cursor=pointer]:
+          - img [ref=e958]
+    - generic [ref=e961]:
+      - img "Report" [ref=e964]
+      - generic [ref=e965]:
+        - generic [ref=e966]:
+          - generic [ref=e967]: "1"
+          - generic [ref=e968]: Reports
+        - generic [ref=e969]:
+          - generic [ref=e970]: "1"
+          - generic [ref=e971]: Days
+        - generic [ref=e972]:
+          - generic [ref=e973]: Mixed Waste
+          - generic [ref=e974]: Waste Type
+      - generic [ref=e975]:
+        - heading "Accountability" [level=3] [ref=e976]
+        - generic [ref=e977]:
+          - generic [ref=e978] [cursor=pointer]:
+            - img "N. A. Haris" [ref=e979]
+            - generic [ref=e980]:
+              - generic [ref=e981]: N. A. HarisINC
+              - generic [ref=e982]: MLA · Shantinagar Constituency
+            - img [ref=e983]
+          - generic [ref=e985] [cursor=pointer]:
+            - img "P. C. Mohan" [ref=e986]
+            - generic [ref=e987]:
+              - generic [ref=e988]: P. C. MohanBJP
+              - generic [ref=e989]: MP · Bangalore Central (Lok Sabha)
+            - img [ref=e990]
+          - generic [ref=e992] [cursor=pointer]:
+            - generic [ref=e993]: W129
+            - generic [ref=e994]:
+              - generic [ref=e995]: "Ward #129"
+              - generic [ref=e996]: South Zone
+            - img [ref=e997]
+      - generic [ref=e1000]:
+        - img [ref=e1001]
+        - generic [ref=e1004]:
+          - text: First reported
+          - strong [ref=e1005]: Yesterday
+          - text: . 1 citizen(s) reported this.
+      - generic [ref=e1006]:
+        - button "I have seen this too" [ref=e1007] [cursor=pointer]:
+          - img [ref=e1008]
+          - text: I have seen this too
+        - button "File BBMP Complaint via WhatsApp" [ref=e1010] [cursor=pointer]:
+          - img [ref=e1011]
+          - text: File BBMP Complaint via WhatsApp
+        - button "It is Cleaned Up — Verify" [ref=e1013] [cursor=pointer]:
+          - img [ref=e1014]
+          - text: It is Cleaned Up — Verify
+      - generic [ref=e1017]:
+        - img [ref=e1018]
+        - generic [ref=e1021]: All reports are anonymous

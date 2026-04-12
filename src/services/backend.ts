@@ -193,8 +193,21 @@ function getFallbackWard(sourceWardNumber: number, wards: Ward[]) {
 }
 
 function getBhubaneswarAddress(ward: Ward) {
-  const locality = ward.locality_name?.trim() || ward.ward_name;
-  return `${locality}, Ward ${ward.ward_number}, Bhubaneswar`;
+  const locality = ward.locality_name?.trim();
+  const wardName = ward.ward_name?.trim() || "";
+  const normalizedWardName = wardName
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  const match = normalizedWardName.match(/^ward(?:\s+no\.?)?[\s#:-]*0*(\d+)$/);
+  const hasDistinctWardName = Boolean(wardName) && !(match && Number(match[1]) === ward.ward_number);
+
+  if (locality) {
+    return `${locality}, Ward ${ward.ward_number}, Bhubaneswar`;
+  }
+  if (hasDistinctWardName) {
+    return `${wardName}, Ward ${ward.ward_number}, Bhubaneswar`;
+  }
+  return `Ward ${ward.ward_number}, Bhubaneswar`;
 }
 
 function hashString(input: string) {
