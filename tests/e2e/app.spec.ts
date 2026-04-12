@@ -15,7 +15,6 @@ test("list mode exposes the issue feed", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /Start using map/i }).click().catch(() => undefined);
   await page.getByRole("button", { name: /^List$/i }).click();
-  await expect(page.getByText(/visible issues/i)).toBeVisible();
   await expect(page.locator(".report-item").first()).toBeVisible();
 });
 

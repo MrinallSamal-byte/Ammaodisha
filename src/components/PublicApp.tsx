@@ -254,10 +254,11 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
 
       <header className="topbar safe-top">
         <button className="brand-chip" onClick={() => navigate("/")} aria-label="Go to Amma Odisha map">
-          <img src="/logo.png" alt="Amma Odisha" />
-          <span>
-            <strong>Amma Odisha</strong>
-            <small>Bhubaneswar civic map</small>
+          <span className="brand-wordmark">
+            <strong>
+              Amma <b>Odisha</b>
+            </strong>
+            <small>v0.3.0</small>
           </span>
         </button>
         <div className="topbar-actions">
@@ -585,14 +586,17 @@ function ReportListItem({
   const wardName = getDistinctWardName(ward);
   return (
     <button className="report-item" onClick={() => onSelect(report)}>
-      {report.photo_url ? <img src={report.photo_url} alt="" /> : <span className="photo-placeholder">No Photo</span>}
+      <span className="report-item-badge">{report.upvote_count ?? 0}</span>
       <span className="report-item-body">
         <strong>{report.address}</strong>
         <small>
           Ward #{report.ward_number}
           {wardName ? ` · ${wardName}` : ""} · {timeAgo(report.created_at)}
         </small>
-        <em style={{ color: severity.color }}>{severity.label}</em>
+      </span>
+      <span className="report-item-tags" aria-label={`${severity.label}, ${STATUS_LABELS[report.status]}`}>
+        <em className={`severity-chip severity-${report.severity}`}>{severity.label}</em>
+        <span className={clsx("status-chip", report.status === "resolved" ? "is-resolved" : "is-open")}>{STATUS_LABELS[report.status]}</span>
       </span>
       <ChevronDown size={14} className="sideways" />
     </button>
