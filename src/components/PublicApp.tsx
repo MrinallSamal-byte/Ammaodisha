@@ -399,9 +399,18 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
 }
 
 function BottomSheet({ children }: { children: ReactNode }) {
+  const [collapsed, setCollapsed] = useState(false);
+
   return (
-    <aside className="bottom-sheet safe-bottom">
-      <div className="sheet-handle" />
+    <aside className={clsx("bottom-sheet safe-bottom", collapsed && "is-collapsed")}>
+      <button
+        className="sheet-handle-button"
+        type="button"
+        onClick={() => setCollapsed((value) => !value)}
+        aria-label={collapsed ? "Expand panel" : "Collapse panel"}
+      >
+        <span className="sheet-handle" />
+      </button>
       <div className="sheet-content">{children}</div>
     </aside>
   );
