@@ -137,14 +137,14 @@ button:disabled {
 .brand-chip {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
   height: 42px;
-  padding: 4px 12px 4px 5px;
+  width: 42px;
+  padding: 5px;
   border-radius: 12px;
   background: rgb(255 255 255 / 94%);
   color: #111827;
   box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
-  font-weight: 800;
 }
 
 .brand-chip img {

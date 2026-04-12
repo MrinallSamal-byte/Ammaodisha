@@ -37,7 +37,7 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard 
         source: "wards",
         paint: {
           "fill-color": "#dc2626",
-          "fill-opacity": 0.045
+          "fill-opacity": 0.08
         }
       });
       map.addLayer({
@@ -46,8 +46,8 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard 
         source: "wards",
         paint: {
           "line-color": "#dc2626",
-          "line-opacity": 0.24,
-          "line-width": 1
+          "line-opacity": 0.9,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 9, 1.2, 12, 2.2, 14, 3]
         }
       });
       map.on("click", "wards-fill", (event) => {

@@ -138,8 +138,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
 
       <header className="topbar safe-top">
         <button className="brand-chip" onClick={() => navigate("/")} aria-label="Go to map">
-          <img src="/logo.png" alt="" />
-          <span>Amma Odisha</span>
+          <img src="/logo.png" alt="Amma Odisha" />
         </button>
         <div className="topbar-actions">
           <IconButton label="About Amma Odisha" onClick={() => setShowAbout(true)}>
