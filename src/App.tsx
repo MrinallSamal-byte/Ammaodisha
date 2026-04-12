@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminPanel } from "./components/AdminPanel";
 import { PublicApp } from "./components/PublicApp";
 import { backend } from "./services/backend";
@@ -32,10 +32,10 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  const navigate = (nextPath: string) => {
+  const navigate = useCallback((nextPath: string) => {
     window.history.pushState({}, "", nextPath);
     setPath(nextPath);
-  };
+  }, []);
 
   const routeSelection = useMemo(() => parseRoute(path), [path]);
 

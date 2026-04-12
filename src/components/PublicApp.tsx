@@ -22,7 +22,7 @@ import {
   Trophy,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { MapView } from "./MapView";
 import { CHANGELOG, CATEGORIES, SEVERITY, STATUS_LABELS } from "../services/constants";
 import { backend } from "../services/backend";
@@ -121,19 +121,29 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
     setShowIntro(false);
   };
 
+  const handleMapReportSelect = useCallback(
+    (report: GarbageReport) => {
+      setSelectedReport(report);
+      navigate(`/report/${report.id}`);
+    },
+    [navigate]
+  );
+
+  const handleMapWardSelect = useCallback(
+    (wardNumber: number) => {
+      setSelectedProfile({ type: "ward", id: String(wardNumber) });
+      navigate(`/ward/${wardNumber}`);
+    },
+    [navigate]
+  );
+
   return (
     <div className="app-frame">
       <MapView
         reports={filteredReports}
         wardBoundaries={data.wardBoundaries}
-        onSelectReport={(report) => {
-          setSelectedReport(report);
-          navigate(`/report/${report.id}`);
-        }}
-        onSelectWard={(wardNumber) => {
-          setSelectedProfile({ type: "ward", id: String(wardNumber) });
-          navigate(`/ward/${wardNumber}`);
-        }}
+        onSelectReport={handleMapReportSelect}
+        onSelectWard={handleMapWardSelect}
       />
 
       <header className="topbar safe-top">
