@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { IS_STAGING, LOCAL_REPORTS_KEY } from "./constants";
-import { findNearestWard, findWardInGeoJson, isInsideCity } from "./geo";
+import { findNearestWard, findWardInGeoJson, isInsideCity, pointInRing } from "./geo";
 import { canSubmitReport, getFingerprint, hasUpvoted, markUpvoted, recordSubmission } from "./limits";
 import type {
   AdminStats,
@@ -58,6 +58,78 @@ function getBhubaneswarAddress(ward: Ward) {
   return `${locality}, Ward ${ward.ward_number}, Bhubaneswar`;
 }
 
+function hashString(input: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function mulberry32(seed: number) {
+  return () => {
+    let next = (seed += 0x6d2b79f5);
+    next = Math.imul(next ^ (next >>> 15), next | 1);
+    next ^= next + Math.imul(next ^ (next >>> 7), next | 61);
+    return ((next ^ (next >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function isPointInPolygon(point: [number, number], polygon: [number, number][][]) {
+  const outer = polygon[0] as [number, number][];
+  const holes = polygon.slice(1) as [number, number][][];
+  return pointInRing(point, outer) && !holes.some((hole) => pointInRing(point, hole));
+}
+
+function getPolygonBbox(polygon: [number, number][][]) {
+  const outer = polygon[0] as [number, number][];
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+
+  outer.forEach(([lng, lat]) => {
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  });
+
+  return { minLng, maxLng, minLat, maxLat };
+}
+
+function getPolygonCentroid(polygon: [number, number][][]): [number, number] {
+  const outer = polygon[0] as [number, number][];
+  const count = Math.max(1, outer.length);
+  const sums = outer.reduce(
+    (acc, [lng, lat]) => ({ lng: acc.lng + lng, lat: acc.lat + lat }),
+    { lng: 0, lat: 0 }
+  );
+  return [sums.lng / count, sums.lat / count];
+}
+
+function getWardSamplePoint(wardNumber: number, reportId: string, boundaries: WardFeatureCollection): [number, number] | null {
+  const feature = boundaries.features.find((item) => Number(item.properties?.ward_number) === wardNumber);
+  if (!feature) return null;
+  const polygons = feature.geometry.type === "Polygon" ? [feature.geometry.coordinates] : feature.geometry.coordinates;
+  if (!polygons.length) return null;
+
+  const polygonSeed = `${reportId}:${wardNumber}`;
+  const rng = mulberry32(hashString(polygonSeed));
+  const polygon = polygons[Math.floor(rng() * polygons.length)] as [number, number][][];
+  const bounds = getPolygonBbox(polygon);
+
+  for (let attempts = 0; attempts < 80; attempts += 1) {
+    const lng = bounds.minLng + (bounds.maxLng - bounds.minLng) * rng();
+    const lat = bounds.minLat + (bounds.maxLat - bounds.minLat) * rng();
+    const point: [number, number] = [lng, lat];
+    if (isPointInPolygon(point, polygon)) return point;
+  }
+
+  return getPolygonCentroid(polygon);
+}
+
 function shouldRewriteAddress(address: string, outsideCity: boolean) {
   if (outsideCity) return true;
   return /bengaluru|bangalore|karnataka|hsr|koramangala|marathahalli|mahadevapura|banashankari/i.test(address);
@@ -77,13 +149,14 @@ function normalizeToBhubaneswar(report: GarbageReport, wards: Ward[], boundaries
   if (!ward) return report;
 
   const insideWard = Boolean(wardFromPoint) && !outsideCity;
+  const wardPoint = getWardSamplePoint(ward.ward_number, report.id, boundaries);
   const nextAddress = shouldRewriteAddress(report.address || "", outsideCity) ? getBhubaneswarAddress(ward) : report.address;
 
   return {
     ...report,
     ward_number: ward.ward_number,
-    latitude: insideWard ? latitude : Number(ward.center_lat),
-    longitude: insideWard ? longitude : Number(ward.center_lng),
+    latitude: insideWard ? latitude : Number(wardPoint?.[1] ?? ward.center_lat),
+    longitude: insideWard ? longitude : Number(wardPoint?.[0] ?? ward.center_lng),
     address: nextAddress
   };
 }
