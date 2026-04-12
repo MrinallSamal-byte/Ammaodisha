@@ -325,6 +325,35 @@ a:focus-visible {
   font-weight: 800;
 }
 
+.civic-notice a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 800;
+}
+
+.civic-notice a:hover {
+  text-decoration: underline;
+}
+
+.civic-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: auto;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-faint);
+}
+
+.civic-dismiss:hover {
+  color: var(--text-muted);
+  background: rgb(0 0 0 / 6%);
+}
+
 .control-dock {
   position: fixed;
   top: calc(max(var(--safe-top), 8px) + 116px);
@@ -666,6 +695,20 @@ a:focus-visible {
   flex: 0 0 auto;
   color: var(--text-faint);
   transform: rotate(-90deg);
+}
+
+.mla-label {
+  display: block;
+  margin-top: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.3;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .modal-layer,
@@ -2030,6 +2073,10 @@ a:focus-visible {
   box-shadow: none;
 }
 
+.civic-notice svg {
+  color: #0876bd;
+}
+
 .civic-notice span {
   font-size: 12px;
   white-space: nowrap;
@@ -2037,9 +2084,20 @@ a:focus-visible {
   text-overflow: ellipsis;
 }
 
-.civic-notice button {
-  min-height: 30px;
-  background: #ffffff;
+.civic-notice a {
+  color: #0876bd;
+}
+
+.civic-notice .civic-dismiss {
+  min-height: auto;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  color: var(--text-faint);
+}
+
+.civic-notice .civic-dismiss:hover {
+  color: var(--text-muted);
 }
 
 .control-dock {

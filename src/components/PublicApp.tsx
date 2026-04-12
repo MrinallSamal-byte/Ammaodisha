@@ -1,11 +1,12 @@
 import clsx from "clsx";
 import {
   ArrowUpRight,
-  Bell,
+  BarChart3,
   Camera,
   CheckCircle2,
   ChevronDown,
   CircleAlert,
+  Home,
   Info,
   Layers,
   List,
@@ -95,6 +96,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   const [showIntro, setShowIntro] = useState(() => localStorage.getItem("nk_intro_seen") !== "1");
   const [showAbout, setShowAbout] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
+  const [showCivicNotice, setShowCivicNotice] = useState(() => localStorage.getItem("nk_civic_hidden") !== "1");
   const [viewMode, setViewMode] = useState<"map" | "list">("map");
   const [severityFilter, setSeverityFilter] = useState<"all" | SeverityKey>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "unresolved" | "resolved">("all");
@@ -262,25 +264,25 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
           </span>
         </button>
         <div className="topbar-actions">
-          <IconButton label="About Amma Odisha" onClick={() => setShowAbout(true)}>
-            <Info size={17} />
-          </IconButton>
-          <IconButton label="What's new" onClick={() => setShowChangelog(true)}>
-            <Bell size={17} />
-          </IconButton>
+          <a className="icon-button" href="https://x.com/realmojojojo_" target="_blank" rel="noreferrer" aria-label="Follow on X">
+            <X size={17} />
+          </a>
         </div>
       </header>
 
-      <section className="civic-notice" aria-label="Amma Odisha civic reporting context">
-        <Sparkles size={15} />
-        <span>
-          <strong>Public garbage map</strong>{" "}
-          Report, verify, and track ward accountability across Bhubaneswar.
-        </span>
-        <button type="button" onClick={() => setShowAbout(true)}>
-          How it works
-        </button>
-      </section>
+      {showCivicNotice && (
+        <section className="civic-notice" aria-label="Amma Odisha civic reporting context">
+          <Home size={15} />
+          <span>
+            <strong>Amma Odisha</strong>{" "}
+            Report, verify, and track ward accountability across Bhubaneswar. →{" "}
+            <a href="https://ammaodisha.in" target="_blank" rel="noreferrer"><strong>ammaodisha.in</strong></a>
+          </span>
+          <button type="button" className="civic-dismiss" onClick={() => { localStorage.setItem("nk_civic_hidden", "1"); setShowCivicNotice(false); }} aria-label="Dismiss notice">
+            <X size={14} />
+          </button>
+        </section>
+      )}
 
       <section className="control-dock" aria-label="Filter reports">
         <div className="control-grid">
@@ -338,14 +340,13 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
 
       {viewMode === "list" && (
         <div className="list-overlay">
-          <ReportList reports={visibleReports} wards={data.wards} onSelect={handleMapReportSelect} />
+          <ReportList reports={visibleReports} wards={data.wards} representatives={data.representatives} onSelect={handleMapReportSelect} />
         </div>
       )}
 
       <section className="stats-strip" aria-label="Amma Odisha report statistics">
         <Stat label="Active" value={unresolved.length} tone="red" />
         <Stat label="Reports" value={reports.length} tone="gray" />
-        <Stat label="Resolved" value={resolved.length} tone="green" />
       </section>
 
       <footer className="bottom-action-bar safe-bottom">
@@ -354,10 +355,9 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
           Report Garbage
         </button>
         <button className="insights-button" type="button" onClick={() => setShowInsights(true)} aria-label="Open Amma Odisha insights">
-          <Trophy size={18} />
+          <BarChart3 size={18} />
           <span>
             <strong>{visibleReports.length}</strong>
-            <small>Insights</small>
           </span>
         </button>
       </footer>
@@ -547,10 +547,12 @@ function IntroOverlay({ onClose }: { onClose: () => void }) {
 function ReportList({
   reports,
   wards,
+  representatives,
   onSelect
 }: {
   reports: GarbageReport[];
   wards: Ward[];
+  representatives?: Representative[];
   onSelect: (report: GarbageReport) => void;
 }) {
   return (
@@ -564,7 +566,16 @@ function ReportList({
       </div>
       {reports.length ? (
         reports.map((report) => (
-          <ReportListItem key={report.id} report={report} ward={wards.find((ward) => ward.ward_number === report.ward_number)} onSelect={onSelect} />
+          <ReportListItem
+            key={report.id}
+            report={report}
+            ward={wards.find((ward) => ward.ward_number === report.ward_number)}
+            mla={representatives?.find((rep) => {
+              const w = wards.find((ward) => ward.ward_number === report.ward_number);
+              return rep.role === "mla" && w && rep.constituency === w.assembly_constituency;
+            })}
+            onSelect={onSelect}
+          />
         ))
       ) : (
         <p className="empty">No reports yet. Be the first to report a garbage dump in your area!</p>
@@ -576,10 +587,12 @@ function ReportList({
 function ReportListItem({
   report,
   ward,
+  mla,
   onSelect
 }: {
   report: GarbageReport;
   ward?: Ward;
+  mla?: Representative;
   onSelect: (report: GarbageReport) => void;
 }) {
   const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
@@ -588,15 +601,14 @@ function ReportListItem({
     <button className="report-item" onClick={() => onSelect(report)}>
       <span className="report-item-badge">{report.upvote_count ?? 0}</span>
       <span className="report-item-body">
-        <strong>{report.address}</strong>
+        <strong>{wardName || report.address}</strong>
         <small>
-          Ward #{report.ward_number}
-          {wardName ? ` · ${wardName}` : ""} · {timeAgo(report.created_at)}
+          {report.address}{wardName ? ` · Ward #${report.ward_number}` : ""} · {timeAgo(report.created_at)}
         </small>
       </span>
       <span className="report-item-tags" aria-label={`${severity.label}, ${STATUS_LABELS[report.status]}`}>
         <em className={`severity-chip severity-${report.severity}`}>{severity.label}</em>
-        <span className={clsx("status-chip", report.status === "resolved" ? "is-resolved" : "is-open")}>{STATUS_LABELS[report.status]}</span>
+        {mla ? <small className="mla-label">{mla.name}</small> : <span className={clsx("status-chip", report.status === "resolved" ? "is-resolved" : "is-open")}>{STATUS_LABELS[report.status]}</span>}
       </span>
       <ChevronDown size={14} className="sideways" />
     </button>
