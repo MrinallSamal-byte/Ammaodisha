@@ -1,52 +1,90 @@
 [
-  {
-    "id": "mp-bhubaneswar",
-    "name": "Aparajita Sarangi",
-    "role": "mp",
-    "constituency": "Bhubaneswar",
-    "party": "BJP",
-    "party_full": "Bharatiya Janata Party",
-    "active": true,
-    "photo_url": "https://upload.wikimedia.org/wikipedia/commons/1/14/Aparajita_Sarangi.jpg"
-  },
-  {
-    "id": "mla-113",
-    "name": "Susant Kumar Rout",
-    "role": "mla",
-    "constituency": "Bhubaneswar North (Uttar)",
-    "party": "BJD",
-    "party_full": "Biju Janata Dal",
-    "active": true,
-    "photo_url": ""
-  },
-  {
-    "id": "mla-112",
-    "name": "Ananta Narayan Jena",
-    "role": "mla",
-    "constituency": "Bhubaneswar Central (Madhya)",
-    "party": "BJD",
-    "party_full": "Biju Janata Dal",
-    "active": true,
-    "photo_url": ""
-  },
-  {
-    "id": "mla-114",
-    "name": "Babu Singh",
-    "role": "mla",
-    "constituency": "Ekamra-Bhubaneswar",
-    "party": "BJP",
-    "party_full": "Bharatiya Janata Party",
-    "active": true,
-    "photo_url": ""
-  },
-  {
-    "id": "mla-115",
-    "name": "Bibhuti Bhusan Balabantaray",
-    "role": "mla",
-    "constituency": "Jatani",
-    "party": "BJD",
-    "party_full": "Biju Janata Dal",
-    "active": true,
-    "photo_url": ""
-  }
+    {
+        "id": "mp-bhubaneswar",
+        "name": "Aparajita Sarangi",
+        "role": "mp",
+        "constituency": "Bhubaneswar",
+        "party": "BJP",
+        "party_full": "Bharatiya Janata Party",
+        "active": true,
+        "photo_url": "https://upload.wikimedia.org/wikipedia/commons/1/14/Aparajita_Sarangi.jpg",
+        "profile_url": "https://www.myneta.info/LokSabha2024/candidate.php?candidate_id=8040"
+    },
+    {
+        "id": "mla-113",
+        "name": "Susant Kumar Rout",
+        "role": "mla",
+        "constituency": "Bhubaneswar North (Uttar)",
+        "party": "BJD",
+        "party_full": "Biju Janata Dal",
+        "active": true,
+        "photo_url": "",
+        "profile_url": "https://www.myneta.info/Odisha2024/candidate.php?candidate_id=607"
+    },
+    {
+        "id": "mla-112",
+        "name": "Ananta Narayan Jena",
+        "role": "mla",
+        "constituency": "Bhubaneswar Central (Madhya)",
+        "party": "BJD",
+        "party_full": "Biju Janata Dal",
+        "active": true,
+        "photo_url": "",
+        "profile_url": "https://www.myneta.info/Odisha2024/candidate.php?candidate_id=593"
+    },
+    {
+        "id": "mla-114",
+        "name": "Babu Singh",
+        "role": "mla",
+        "constituency": "Ekamra-Bhubaneswar",
+        "party": "BJP",
+        "party_full": "Bharatiya Janata Party",
+        "active": true,
+        "photo_url": "",
+        "profile_url": "https://www.myneta.info/Odisha2024/candidate.php?candidate_id=687"
+    },
+    {
+        "id": "mla-115",
+        "name": "Bibhuti Bhusan Balabantaray",
+        "role": "mla",
+        "constituency": "Jatani",
+        "party": "BJD",
+        "party_full": "Biju Janata Dal",
+        "active": true,
+        "photo_url": "",
+        "profile_url": "https://www.myneta.info/Odisha2024/candidate.php?candidate_id=714"
+    },
+    {
+        "id": "mla-111",
+        "name": "Naba Kishor Mallick",
+        "role": "mla",
+        "constituency": "Jayadev",
+        "party": "BJD",
+        "party_full": "Biju Janata Dal",
+        "active": true,
+        "photo_url": "",
+        "profile_url": "https://www.myneta.info/Odisha2024/candidate.php?candidate_id=726"
+    },
+    {
+        "id": "mla-116",
+        "name": "Pradip Kumar Sahu",
+        "role": "mla",
+        "constituency": "Begunia",
+        "party": "BJD",
+        "party_full": "Biju Janata Dal",
+        "active": true,
+        "photo_url": "",
+        "profile_url": "https://www.myneta.info/Odisha2024/candidate.php?candidate_id=581"
+    },
+    {
+        "id": "mla-117",
+        "name": "Prasanta Kumar Jagadev",
+        "role": "mla",
+        "constituency": "Khurda",
+        "party": "BJP",
+        "party_full": "Bharatiya Janata Party",
+        "active": true,
+        "photo_url": "",
+        "profile_url": "https://www.myneta.info/Odisha2024/candidate.php?candidate_id=770"
+    }
 ]

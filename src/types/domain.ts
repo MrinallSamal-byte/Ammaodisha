@@ -18,7 +18,7 @@ export interface Ward {
 }
 
 export interface Representative {
-  id: number;
+  id: number | string;
   name: string;
   role: RepresentativeRole;
   party: string;
@@ -26,6 +26,7 @@ export interface Representative {
   phone?: string | null;
   email?: string | null;
   photo_url?: string | null;
+  profile_url?: string | null;
   twitter_handle?: string | null;
   active: boolean;
   created_at?: string;
