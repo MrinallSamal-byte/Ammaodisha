@@ -1,8 +1,8 @@
-import { BBMP_WHATSAPP, CATEGORIES, SEVERITY } from "./constants";
+import { BMC_WHATSAPP, CATEGORIES, SEVERITY } from "./constants";
 import type { GarbageReport, Representative, Ward } from "../types/domain";
 import { daysActive } from "./time";
 
-export function generateBBMPComplaint(input: {
+export function generateBMCComplaint(input: {
   address: string;
   wardName: string;
   wardNumber: number | string;
@@ -43,7 +43,7 @@ Report garbage in your ward -> ${origin}`;
 }
 
 export function getWhatsAppUrl(message: string) {
-  return `https://wa.me/${BBMP_WHATSAPP}?text=${encodeURIComponent(message)}`;
+  return `https://wa.me/${BMC_WHATSAPP}?text=${encodeURIComponent(message)}`;
 }
 
 export async function shareOrCopy(data: ShareData, fallbackUrl: string) {

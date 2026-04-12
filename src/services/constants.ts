@@ -3,9 +3,9 @@ import type { SeverityKey, WasteCategory } from "../types/domain";
 export const CITY_CENTER = { latitude: 20.2961, longitude: 85.8245 };
 export const CITY_ZOOM = 12;
 export const MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
-export const BBMP_WHATSAPP = "916742432100";
+export const BMC_WHATSAPP = "916742432100";
 
-export const PROD_HOSTNAMES = ["nammakasa.vercel.app", "nammakasa.in", "www.nammakasa.in"];
+export const PROD_HOSTNAMES = ["ammaodisha.vercel.app", "ammaodisha.in", "www.ammaodisha.in"];
 export const IS_STAGING = typeof window !== "undefined" && !PROD_HOSTNAMES.includes(window.location.hostname);
 
 export const SEVERITY: Record<
@@ -79,12 +79,12 @@ export const CHANGELOG = [
     date: "Apr 2026",
     tag: "Launch",
     changes: [
-      { type: "new", text: "Map with 243 BBMP ward boundaries" },
+      { type: "new", text: "Map with official Bhubaneswar ward boundaries" },
       { type: "new", text: "GPS-based ward detection with PostGIS" },
       { type: "new", text: "Photo capture, compression, and upload" },
       { type: "new", text: "Report submission with severity and category" },
       { type: "new", text: "Report detail with MLA/MP accountability" },
-      { type: "new", text: "28 MLAs + 4 MPs with photos and party data" },
+      { type: "new", text: "4 MLAs + 1 MP with photos and party data" },
       { type: "new", text: "Upvote system with fingerprint dedup" },
       { type: "new", text: "Resolve flow with before/after photos" },
       { type: "new", text: "Leaderboard: worst wards ranked" },

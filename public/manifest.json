@@ -1,7 +1,7 @@
 {
-  "name": "NammaKasa",
-  "short_name": "NammaKasa",
-  "description": "Crowdsourced garbage map for Bengaluru — report dumps, track accountability",
+  "name": "Amma Odisha",
+  "short_name": "Amma Odisha",
+  "description": "Crowdsourced garbage map for Bhubaneswar — report dumps, track accountability",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

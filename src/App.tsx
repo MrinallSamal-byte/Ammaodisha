@@ -45,7 +45,7 @@ export default function App() {
     return (
       <main className="loading-state">
         <img src="/Favicon.svg" alt="" />
-        <h1>Could not load NammaKasa</h1>
+        <h1>Could not load Amma Odisha</h1>
         <p>{error}</p>
         <button onClick={() => location.reload()}>Try again</button>
       </main>

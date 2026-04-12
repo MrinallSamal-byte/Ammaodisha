@@ -28,7 +28,7 @@ import { CHANGELOG, CATEGORIES, SEVERITY, STATUS_LABELS } from "../services/cons
 import { backend } from "../services/backend";
 import { findNearestWard, findWardInGeoJson, isInsideCity } from "../services/geo";
 import { canSubmitReport, hasUpvoted } from "../services/limits";
-import { generateBBMPComplaint, getReportShareText, getWhatsAppUrl } from "../services/share";
+import { generateBMCComplaint, getReportShareText, getWhatsAppUrl } from "../services/share";
 import { daysActive, timeAgo } from "../services/time";
 import type {
   CivicData,
@@ -161,7 +161,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
         </div>
       )}
 
-      <section className="stats-strip" aria-label="NammaKasa report statistics">
+      <section className="stats-strip" aria-label="Amma Odisha report statistics">
         <Stat label="Active" value={unresolved.length} tone="red" />
         <Stat label="Reports" value={reports.length} tone="gray" />
         <Stat label="Resolved" value={resolved.length} tone="green" />
@@ -428,7 +428,7 @@ function ReportDetail({
   };
 
   const complaint = () => {
-    const text = generateBBMPComplaint({
+    const text = generateBMCComplaint({
       address: report.address,
       wardName: ward?.ward_name ?? "Unknown",
       wardNumber: ward?.ward_number ?? "?",
@@ -866,8 +866,8 @@ function AboutSheet({ onClose }: { onClose: () => void }) {
           <a href="https://x.com/realmojojojo_" target="_blank" rel="noreferrer">
             Built by @realmojojojo_
           </a>
-          <a href="https://nammakasa.in" target="_blank" rel="noreferrer">
-            nammakasa.in
+          <a href="https://ammaodisha.in" target="_blank" rel="noreferrer">
+            ammaodisha.in
           </a>
         </div>
       </article>
@@ -883,7 +883,7 @@ function ChangelogSheet({ onClose }: { onClose: () => void }) {
           <X size={18} />
         </button>
         <h2>Changelog</h2>
-        <p className="muted">What's new in NammaKasa</p>
+        <p className="muted">What's new in Amma Odisha</p>
         {CHANGELOG.map((entry) => (
           <div className="changelog-entry" key={entry.version}>
             <div className="sheet-title-row compact">
@@ -923,7 +923,7 @@ function TelegramToast() {
         <strong>Join the community</strong>
         Feedback, ideas & updates on Telegram
       </span>
-      <a href="https://t.me/nammakasa" target="_blank" rel="noreferrer">
+      <a href="https://t.me/ammaodisha" target="_blank" rel="noreferrer">
         Join
       </a>
     </div>
