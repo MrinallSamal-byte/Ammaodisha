@@ -58,6 +58,8 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   const [reports, setReports] = useState(data.reports);
   const [selectedReport, setSelectedReport] = useState<GarbageReport | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<RouteSelection>(null);
+  const [focusWardNumber, setFocusWardNumber] = useState<number | null>(null);
+  const [focusRequestId, setFocusRequestId] = useState(0);
   const [showReportForm, setShowReportForm] = useState(false);
   const [showIntro, setShowIntro] = useState(() => localStorage.getItem("nk_intro_seen") !== "1");
   const [showAbout, setShowAbout] = useState(false);
@@ -121,6 +123,19 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
     setShowIntro(false);
   };
 
+  const focusWardOnMap = useCallback((wardNumber: number) => {
+    setFocusWardNumber(wardNumber);
+    setFocusRequestId((id) => id + 1);
+  }, []);
+
+  useEffect(() => {
+    if (routeSelection?.type !== "ward") return;
+    const wardNumber = Number(routeSelection.id);
+    if (Number.isFinite(wardNumber)) {
+      focusWardOnMap(wardNumber);
+    }
+  }, [focusWardOnMap, routeSelection]);
+
   const handleMapReportSelect = useCallback(
     (report: GarbageReport) => {
       setSelectedReport(report);
@@ -131,10 +146,11 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
 
   const handleMapWardSelect = useCallback(
     (wardNumber: number) => {
+      focusWardOnMap(wardNumber);
       setSelectedProfile({ type: "ward", id: String(wardNumber) });
       navigate(`/ward/${wardNumber}`);
     },
-    [navigate]
+    [focusWardOnMap, navigate]
   );
 
   return (
@@ -144,6 +160,8 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
         wardBoundaries={data.wardBoundaries}
         onSelectReport={handleMapReportSelect}
         onSelectWard={handleMapWardSelect}
+        focusWardNumber={focusWardNumber}
+        focusRequestId={focusRequestId}
       />
 
       <header className="topbar safe-top">
@@ -224,6 +242,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
                 className="ward-row"
                 key={item.ward.ward_number}
                 onClick={() => {
+                  focusWardOnMap(item.ward.ward_number);
                   setSelectedProfile({ type: "ward", id: String(item.ward.ward_number) });
                   navigate(`/ward/${item.ward.ward_number}`);
                 }}

@@ -8,9 +8,11 @@ interface MapViewProps {
   wardBoundaries: WardFeatureCollection;
   onSelectReport: (report: GarbageReport) => void;
   onSelectWard: (wardNumber: number) => void;
+  focusWardNumber: number | null;
+  focusRequestId: number;
 }
 
-export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard }: MapViewProps) {
+export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard, focusWardNumber, focusRequestId }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const markersRef = useRef<Marker[]>([]);
@@ -114,6 +116,52 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard 
           .addTo(map);
       });
   }, [reports, onSelectReport]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || focusWardNumber == null) return;
+
+    const feature = wardBoundaries.features.find(
+      (item) => Number(item.properties?.ward_number) === focusWardNumber
+    );
+    if (!feature) return;
+
+    let minLng = Infinity;
+    let maxLng = -Infinity;
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+
+    const polygons = feature.geometry.type === "Polygon" ? [feature.geometry.coordinates] : feature.geometry.coordinates;
+    for (const polygon of polygons) {
+      for (const ring of polygon) {
+        for (const [lng, lat] of ring) {
+          if (lng < minLng) minLng = lng;
+          if (lng > maxLng) maxLng = lng;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
+        }
+      }
+    }
+
+    if (!Number.isFinite(minLng) || !Number.isFinite(maxLng) || !Number.isFinite(minLat) || !Number.isFinite(maxLat)) {
+      return;
+    }
+
+    const isMobile = window.innerWidth < 768;
+    map.fitBounds(
+      [
+        [minLng, minLat],
+        [maxLng, maxLat]
+      ],
+      {
+        duration: 700,
+        maxZoom: 14.5,
+        padding: isMobile
+          ? { top: 88, right: 20, bottom: 300, left: 20 }
+          : { top: 88, right: 56, bottom: 320, left: 320 }
+      }
+    );
+  }, [focusWardNumber, focusRequestId, wardBoundaries]);
 
   return (
     <div className="map-shell" aria-label="Amma Odisha Bhubaneswar garbage map">
