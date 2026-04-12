@@ -22,7 +22,7 @@ import {
   Trophy,
   X
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type TouchEvent } from "react";
 import { MapView } from "./MapView";
 import { CHANGELOG, CATEGORIES, SEVERITY, STATUS_LABELS } from "../services/constants";
 import { backend } from "../services/backend";
@@ -399,17 +399,72 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
 }
 
 function BottomSheet({ children }: { children: ReactNode }) {
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia("(max-width: 719px)").matches;
+  });
   const [collapsed, setCollapsed] = useState(false);
+  const touchStartY = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(max-width: 719px)");
+    const onChange = () => {
+      const nextIsMobile = media.matches;
+      setIsMobile(nextIsMobile);
+      if (!nextIsMobile) setCollapsed(false);
+    };
+
+    onChange();
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", onChange);
+      return () => media.removeEventListener("change", onChange);
+    }
+
+    media.addListener(onChange);
+    return () => media.removeListener(onChange);
+  }, []);
+
+  const toggleCollapsed = () => {
+    if (!isMobile) return;
+    setCollapsed((value) => !value);
+  };
+
+  const onHandleTouchStart = (event: TouchEvent<HTMLButtonElement>) => {
+    touchStartY.current = event.touches[0]?.clientY ?? null;
+  };
+
+  const onHandleTouchEnd = (event: TouchEvent<HTMLButtonElement>) => {
+    if (!isMobile || touchStartY.current === null) return;
+    const endY = event.changedTouches[0]?.clientY ?? touchStartY.current;
+    const delta = endY - touchStartY.current;
+    touchStartY.current = null;
+
+    if (Math.abs(delta) < 14) {
+      toggleCollapsed();
+      return;
+    }
+
+    if (delta > 0) {
+      setCollapsed(true);
+      return;
+    }
+
+    setCollapsed(false);
+  };
 
   return (
-    <aside className={clsx("bottom-sheet safe-bottom", collapsed && "is-collapsed")}>
+    <aside className={clsx("bottom-sheet safe-bottom", isMobile && "is-mobile", collapsed && "is-collapsed")}>
       <button
         className="sheet-handle-button"
         type="button"
-        onClick={() => setCollapsed((value) => !value)}
+        onClick={toggleCollapsed}
+        onTouchStart={onHandleTouchStart}
+        onTouchEnd={onHandleTouchEnd}
         aria-label={collapsed ? "Expand panel" : "Collapse panel"}
       >
         <span className="sheet-handle" />
+        {isMobile && <span className="sheet-handle-label">{collapsed ? "Swipe up to open panel" : "Swipe down to see more map"}</span>}
       </button>
       <div className="sheet-content">{children}</div>
     </aside>
