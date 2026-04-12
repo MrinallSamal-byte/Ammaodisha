@@ -77,14 +77,34 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard 
       .filter((report) => report.status !== "resolved")
       .map((report) => {
         const markerEl = document.createElement("button");
+        const markerDotEl = document.createElement("span");
         const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
+        const baseZIndex = String(Math.round(severity.size));
         markerEl.className = "garbage-marker";
         markerEl.type = "button";
         markerEl.style.setProperty("--marker-color", severity.color);
         markerEl.style.width = `${Math.max(18, severity.size + 12)}px`;
         markerEl.style.height = `${Math.max(18, severity.size + 12)}px`;
+        markerEl.style.zIndex = baseZIndex;
         markerEl.title = report.address;
         markerEl.setAttribute("aria-label", `Open report at ${report.address}`);
+        markerDotEl.className = "garbage-marker-dot";
+        markerDotEl.setAttribute("aria-hidden", "true");
+        markerEl.append(markerDotEl);
+
+        markerEl.addEventListener("mouseenter", () => {
+          markerEl.style.zIndex = "1000";
+        });
+        markerEl.addEventListener("mouseleave", () => {
+          markerEl.style.zIndex = baseZIndex;
+        });
+        markerEl.addEventListener("focus", () => {
+          markerEl.style.zIndex = "1000";
+        });
+        markerEl.addEventListener("blur", () => {
+          markerEl.style.zIndex = baseZIndex;
+        });
+
         markerEl.addEventListener("click", (event) => {
           event.stopPropagation();
           onSelectReport(report);
