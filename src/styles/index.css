@@ -1551,6 +1551,19 @@ input:focus {
 }
 
 @media (max-width: 719px) {
+  .map-mode-toggle {
+    top: calc(max(var(--safe-top), 8px) + 106px);
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(220px, calc(100vw - 24px));
+  }
+
+  .map-mode-toggle .segmented-button {
+    flex: 1;
+    justify-content: center;
+  }
+
   .bottom-sheet.is-mobile {
     transition: max-height 0.22s ease;
   }
@@ -1588,7 +1601,8 @@ input:focus {
   }
 
   .list-overlay {
-    inset: calc(max(var(--safe-top), 8px) + 110px) 10px calc(max(var(--safe-bottom), 8px) + 280px);
+    inset: calc(max(var(--safe-top), 8px) + 156px) 10px calc(max(var(--safe-bottom), 8px) + 84px);
+    border-radius: 16px;
   }
 
   .admin-stats {

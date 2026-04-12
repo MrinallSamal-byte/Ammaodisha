@@ -256,7 +256,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
         <Stat label="Resolved" value={resolved.length} tone="green" />
       </section>
 
-      <BottomSheet>
+      <BottomSheet forceCollapsed={viewMode === "list"}>
         <div className="sheet-block">
           <div className="sheet-title-row">
             <div>
@@ -398,7 +398,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   );
 }
 
-function BottomSheet({ children }: { children: ReactNode }) {
+function BottomSheet({ children, forceCollapsed = false }: { children: ReactNode; forceCollapsed?: boolean }) {
   const [isMobile, setIsMobile] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.matchMedia("(max-width: 719px)").matches;
@@ -424,6 +424,11 @@ function BottomSheet({ children }: { children: ReactNode }) {
     media.addListener(onChange);
     return () => media.removeListener(onChange);
   }, []);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    setCollapsed(forceCollapsed);
+  }, [forceCollapsed, isMobile]);
 
   const toggleCollapsed = () => {
     if (!isMobile) return;
