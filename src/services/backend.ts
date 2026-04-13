@@ -67,12 +67,16 @@ function normalizeReport(report: GarbageReport): GarbageReport {
     ...report,
     latitude: Number(report.latitude),
     longitude: Number(report.longitude),
+    gps_latitude: report.gps_latitude == null ? null : Number(report.gps_latitude),
+    gps_longitude: report.gps_longitude == null ? null : Number(report.gps_longitude),
+    gps_accuracy_meters: report.gps_accuracy_meters == null ? null : Number(report.gps_accuracy_meters),
     ward_number: Number(report.ward_number),
     upvote_count: report.upvote_count ?? 1,
     severity: report.severity ?? "medium",
     category: report.category ?? "mixed",
     status: report.status ?? "unresolved",
-    moderation_status: report.moderation_status ?? "approved"
+    moderation_status: report.moderation_status ?? "approved",
+    location_source: report.location_source ?? (report.gps_latitude != null && report.gps_longitude != null ? "gps" : "ward_center")
   };
 }
 

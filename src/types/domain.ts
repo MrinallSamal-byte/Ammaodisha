@@ -5,6 +5,7 @@ export type WasteCategory = "household" | "construction" | "mixed" | "e-waste" |
 export type ReportStatus = "unresolved" | "resolved";
 export type ModerationStatus = "flagged" | "approved" | "rejected";
 export type RepresentativeRole = "mla" | "mp";
+export type ReportLocationSource = "gps" | "ward_center";
 
 export interface Ward {
   ward_number: number;
@@ -61,6 +62,11 @@ export interface GarbageReport {
   id: string;
   latitude: number;
   longitude: number;
+  gps_latitude?: number | null;
+  gps_longitude?: number | null;
+  gps_accuracy_meters?: number | null;
+  gps_recorded_at?: string | null;
+  location_source?: ReportLocationSource;
   ward_number: number;
   address: string;
   severity: SeverityKey;
@@ -88,6 +94,11 @@ export interface GarbageReport {
 export interface NewReportInput {
   latitude: number;
   longitude: number;
+  gps_latitude?: number | null;
+  gps_longitude?: number | null;
+  gps_accuracy_meters?: number | null;
+  gps_recorded_at?: string | null;
+  location_source?: ReportLocationSource;
   ward_number: number;
   address: string;
   severity: SeverityKey;

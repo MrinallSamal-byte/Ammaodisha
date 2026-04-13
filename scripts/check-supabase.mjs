@@ -35,6 +35,14 @@ if (supabaseAnonKey) {
   await checkTable(supabase, "representatives", "id");
   await checkTable(supabase, "garbage_reports", "id");
 
+  await check("Report GPS datapoint columns are readable", async () => {
+    const { error } = await supabase
+      .from("garbage_reports")
+      .select("id,gps_latitude,gps_longitude,gps_accuracy_meters,gps_recorded_at,location_source")
+      .limit(1);
+    if (error) throw error;
+  });
+
   await check("Storage bucket garbage-photos is reachable", async () => {
     const { error } = await supabase.storage.from("garbage-photos").list("reports", { limit: 1 });
     if (error) throw error;

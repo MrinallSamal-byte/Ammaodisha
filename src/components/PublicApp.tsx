@@ -855,7 +855,7 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
 function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () => void; onSubmit: (report: GarbageReport) => void }) {
   const [wardNumber, setWardNumber] = useState("");
   const [detectedWard, setDetectedWard] = useState<Ward | null>(null);
-  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [location, setLocation] = useState<{ lat: number; lng: number; accuracy: number | null; recordedAt: string } | null>(null);
   const [locationState, setLocationState] = useState<"idle" | "locating" | "detecting" | "detected" | "manual" | "outside">("idle");
   const [address, setAddress] = useState("");
   const [severity, setSeverity] = useState<SeverityKey>("medium");
@@ -877,7 +877,8 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
       (position) => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
-        setLocation({ lat, lng });
+        const accuracy = Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : null;
+        setLocation({ lat, lng, accuracy, recordedAt: new Date(position.timestamp || Date.now()).toISOString() });
         if (!isInsideCity(lat, lng)) {
           setLocationState("outside");
           return;
@@ -923,6 +924,11 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
       const input: NewReportInput = {
         latitude: location?.lat ?? selectedWard.center_lat,
         longitude: location?.lng ?? selectedWard.center_lng,
+        gps_latitude: location?.lat ?? null,
+        gps_longitude: location?.lng ?? null,
+        gps_accuracy_meters: location?.accuracy ?? null,
+        gps_recorded_at: location?.recordedAt ?? null,
+        location_source: location ? "gps" : "ward_center",
         ward_number: selectedWard.ward_number,
         address: address.trim(),
         severity,
