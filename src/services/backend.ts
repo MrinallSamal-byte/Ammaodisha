@@ -415,8 +415,8 @@ class LocalBackend implements Backend {
 
   async fetchReports() {
     const data = await this.fetchCivicData();
-    data.reports = normalizeReportsForBhubaneswar(mergeLocalReports(data.reports), data.wards, data.wardBoundaries);
-    return data.reports;
+    const reports = normalizeReportsForBhubaneswar(mergeLocalReports(data.reports), data.wards, data.wardBoundaries);
+    return reports.filter((report) => report.moderation_status !== "rejected");
   }
 
   async fetchReportById(id: string) {
@@ -586,7 +586,7 @@ class SupabaseBackend extends LocalBackend {
   }
 
   override async fetchReports() {
-    let query = this.client.from("garbage_reports").select("*").order("created_at", { ascending: false });
+    let query = this.client.from("garbage_reports").select("*").neq("moderation_status", "rejected").order("created_at", { ascending: false });
     if (!IS_STAGING) query = query.eq("is_test", false);
     const { data, error } = await query;
     if (error) throw error;
@@ -604,6 +604,7 @@ class SupabaseBackend extends LocalBackend {
       .from("garbage_reports")
       .select("*")
       .eq("ward_number", wardNumber)
+      .neq("moderation_status", "rejected")
       .order("created_at", { ascending: false });
     if (error) throw error;
     return (data ?? []).map(normalizeReport);
@@ -621,6 +622,7 @@ class SupabaseBackend extends LocalBackend {
         "ward_number",
         wards.map((ward) => ward.ward_number)
       )
+      .neq("moderation_status", "rejected")
       .order("created_at", { ascending: false });
     if (reportError) throw reportError;
     return (data ?? []).map(normalizeReport);
