@@ -591,6 +591,46 @@ class SupabaseBackend extends LocalBackend {
     this.client = createClient(supabaseUrl!, supabaseAnonKey!);
   }
 
+  private async mergeDerivedUpvoteCounts(reports: GarbageReport[]) {
+    if (!reports.length) return reports;
+
+    const reportIds = reports.map((report) => report.id);
+    const { data: upvotes, error } = await this.client
+      .from("report_upvotes")
+      .select("report_id")
+      .in("report_id", reportIds);
+    if (error) throw error;
+
+    const voteRowsByReportId = new Map<string, number>();
+    (upvotes ?? []).forEach((vote) => {
+      const reportId = vote.report_id as string;
+      voteRowsByReportId.set(reportId, (voteRowsByReportId.get(reportId) ?? 0) + 1);
+    });
+
+    return reports.map((report) => {
+      const persistedCount = Number(report.upvote_count ?? 1);
+      const derivedCount = (voteRowsByReportId.get(report.id) ?? 0) + 1;
+      return {
+        ...report,
+        upvote_count: Math.max(Number.isFinite(persistedCount) ? persistedCount : 1, derivedCount)
+      };
+    });
+  }
+
+  private async getReliableUpvoteCount(reportId: string) {
+    const [reportResult, upvoteCountResult] = await Promise.all([
+      this.client.from("garbage_reports").select("upvote_count").eq("id", reportId).maybeSingle(),
+      this.client.from("report_upvotes").select("id", { count: "exact", head: true }).eq("report_id", reportId)
+    ]);
+
+    if (reportResult.error) throw reportResult.error;
+    if (upvoteCountResult.error) throw upvoteCountResult.error;
+
+    const persistedCount = Number(reportResult.data?.upvote_count ?? 1);
+    const derivedCount = (upvoteCountResult.count ?? 0) + 1;
+    return Math.max(Number.isFinite(persistedCount) ? persistedCount : 1, derivedCount);
+  }
+
   override async fetchCivicData(): Promise<CivicData> {
     const [wards, representatives, reports, wardBoundaries, politicalMapping] = await Promise.all([
       this.client
@@ -624,13 +664,15 @@ class SupabaseBackend extends LocalBackend {
     if (!IS_STAGING) query = query.eq("is_test", false);
     const { data, error } = await query;
     if (error) throw error;
-    return (data ?? []).map(normalizeReport);
+    const withCounts = await this.mergeDerivedUpvoteCounts((data ?? []) as GarbageReport[]);
+    return withCounts.map(normalizeReport);
   }
 
   override async fetchReportById(id: string) {
     const { data, error } = await this.client.from("garbage_reports").select("*").eq("id", id).single();
     if (error) return null;
-    return normalizeReport(data);
+    const [reportWithCount] = await this.mergeDerivedUpvoteCounts([data as GarbageReport]);
+    return normalizeReport(reportWithCount);
   }
 
   override async fetchReportsByWard(wardNumber: number) {
@@ -641,7 +683,8 @@ class SupabaseBackend extends LocalBackend {
       .neq("moderation_status", "rejected")
       .order("created_at", { ascending: false });
     if (error) throw error;
-    return (data ?? []).map(normalizeReport);
+    const withCounts = await this.mergeDerivedUpvoteCounts((data ?? []) as GarbageReport[]);
+    return withCounts.map(normalizeReport);
   }
 
   override async fetchReportsByConstituency(constituency: string, type: "mla" | "mp") {
@@ -656,7 +699,8 @@ class SupabaseBackend extends LocalBackend {
       .neq("moderation_status", "rejected")
       .order("created_at", { ascending: false });
     if (reportError) throw reportError;
-    return (data ?? []).map(normalizeReport);
+    const withCounts = await this.mergeDerivedUpvoteCounts((data ?? []) as GarbageReport[]);
+    return withCounts.map(normalizeReport);
   }
 
   override async submitReport(input: NewReportInput) {
@@ -701,14 +745,7 @@ class SupabaseBackend extends LocalBackend {
       throw error;
     }
 
-    const { data: report, error: reportError } = await this.client
-      .from("garbage_reports")
-      .select("upvote_count")
-      .eq("id", reportId)
-      .maybeSingle();
-    if (reportError) throw reportError;
-
-    const newCount = Number(report?.upvote_count ?? 1);
+    const newCount = await this.getReliableUpvoteCount(reportId);
 
     markUpvoted(reportId);
     return { alreadyVoted: false, newCount };
