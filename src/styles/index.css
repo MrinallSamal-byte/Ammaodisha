@@ -1422,10 +1422,12 @@ a:focus-visible {
 }
 
 .admin-shell {
+  height: 100dvh;
   min-height: 100vh;
   background: var(--surface-soft);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .admin-header {
@@ -1456,8 +1458,10 @@ a:focus-visible {
 }
 
 .admin-list {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .admin-stats,
