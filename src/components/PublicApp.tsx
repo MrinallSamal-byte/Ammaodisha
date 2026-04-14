@@ -1232,7 +1232,7 @@ function AboutSheet({ onClose, onOpenChangelog }: { onClose: () => void; onOpenC
         <p>This is crowdsourced civic infrastructure — built by citizens, for citizens.</p>
         <div className="social-row">
           <a href="https://x.com/realmojojojo_" target="_blank" rel="noreferrer">
-            Built by @realmojojojo_
+            Build By Mrinall Samal
           </a>
           <a href="https://ammaodisha.me" target="_blank" rel="noreferrer">
             ammaodisha.me
