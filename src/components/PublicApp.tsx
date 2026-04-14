@@ -13,6 +13,7 @@ import {
   LoaderCircle,
   Map as MapIcon,
   MessageCircle,
+  Phone,
   Plus,
   RefreshCw,
   Send,
@@ -24,7 +25,7 @@ import {
   X
 } from "lucide-react";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { CHANGELOG, CATEGORIES, SEVERITY, STATUS_LABELS } from "../services/constants";
+import { BMC_CONTACTS, BMC_HELPLINE, BMC_NUMBER, CHANGELOG, CATEGORIES, SEVERITY, STATUS_LABELS } from "../services/constants";
 import { backend } from "../services/backend";
 import { findNearestWard, findWardInGeoJson, isInsideCity } from "../services/geo";
 import { canSubmitReport, hasUpvoted } from "../services/limits";
@@ -767,6 +768,10 @@ function ReportDetail({
     window.open(`https://www.google.com/maps?q=${report.latitude},${report.longitude}`, "_blank", "noopener,noreferrer");
   };
 
+  const callNumber = (value: string) => {
+    window.location.href = `tel:${value}`;
+  };
+
   return (
     <div className="modal-layer" onMouseDown={onClose}>
       <article className="detail-sheet" onMouseDown={(event) => event.stopPropagation()}>
@@ -815,6 +820,14 @@ function ReportDetail({
             <button onClick={complaint}>
               <MessageCircle size={16} />
               WhatsApp BMC
+            </button>
+            <button onClick={() => callNumber(BMC_NUMBER)}>
+              <Phone size={16} />
+              Call BMC
+            </button>
+            <button onClick={() => callNumber(BMC_HELPLINE)}>
+              <Phone size={16} />
+              Helpline 1929
             </button>
             {report.status !== "resolved" && (
               <button onClick={() => setShowResolve(true)} className="green-action">
@@ -1243,6 +1256,9 @@ function ProfileSheet({
 }
 
 function AboutSheet({ onClose, onOpenChangelog }: { onClose: () => void; onOpenChangelog: () => void }) {
+  const wardStart = BMC_CONTACTS.ward_numbers[0];
+  const wardEnd = BMC_CONTACTS.ward_numbers[BMC_CONTACTS.ward_numbers.length - 1];
+
   return (
     <div className="modal-layer top" onMouseDown={onClose}>
       <article className="top-sheet" onMouseDown={(event) => event.stopPropagation()}>
@@ -1260,6 +1276,18 @@ function AboutSheet({ onClose, onOpenChangelog }: { onClose: () => void; onOpenC
           enough citizens report the same spot, it becomes impossible to ignore. The data is public, the accountability is permanent.
         </p>
         <p>This is crowdsourced civic infrastructure — built by citizens, for citizens.</p>
+        <div className="accountability-card">
+          <h3>{BMC_CONTACTS.name} ({BMC_CONTACTS.short_name})</h3>
+          <p>
+            Main Contact: <a href={`tel:${BMC_CONTACTS.main_contact_number}`}>{BMC_CONTACTS.main_contact_number}</a> · Helpline: <a href={`tel:${BMC_CONTACTS.helpline_number}`}>{BMC_CONTACTS.helpline_number}</a>
+          </p>
+          <p>
+            Email: <a href={`mailto:${BMC_CONTACTS.email}`}>{BMC_CONTACTS.email}</a> · Grievance: <a href={`mailto:${BMC_CONTACTS.grievance_email}`}>{BMC_CONTACTS.grievance_email}</a>
+          </p>
+          <p>North Zone: {BMC_CONTACTS.zone_contacts.north_zone} · South-West Zone: {BMC_CONTACTS.zone_contacts.south_west_zone} · South-East Zone: {BMC_CONTACTS.zone_contacts.south_east_zone}</p>
+          <p>{BMC_CONTACTS.address}</p>
+          <p>Coverage: {BMC_CONTACTS.total_wards} wards (Ward {wardStart} to Ward {wardEnd}).</p>
+        </div>
         <div className="social-row">
           <a href="https://x.com/realmojojojo_" target="_blank" rel="noreferrer">
             Build By Mrinall Samal

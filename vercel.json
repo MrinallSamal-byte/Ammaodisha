@@ -1,0 +1,28 @@
+{
+  "rewrites": [
+    {
+      "source": "/admin",
+      "destination": "/"
+    },
+    {
+      "source": "/admin/:path*",
+      "destination": "/"
+    },
+    {
+      "source": "/report/:path*",
+      "destination": "/"
+    },
+    {
+      "source": "/ward/:path*",
+      "destination": "/"
+    },
+    {
+      "source": "/mla/:path*",
+      "destination": "/"
+    },
+    {
+      "source": "/mp/:path*",
+      "destination": "/"
+    }
+  ]
+}

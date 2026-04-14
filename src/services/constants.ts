@@ -5,6 +5,34 @@ export const CITY_ZOOM = 12;
 export const MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 export const BMC_WHATSAPP = "916742432100";
 
+export const BMC_CONTACTS = {
+  name: "Bhubaneswar Municipal Corporation",
+  short_name: "BMC",
+  main_contact_number: "8280282000",
+  helpline_number: "1929",
+  email: "info@bmc.gov.in",
+  grievance_email: "grievance@bmc.gov.in",
+  address: "BMC - ICOMC Tower, Unit-IX, In front of Satya Nagar Kali Temple on Janpath, Bhubaneswar-751022, Odisha, India",
+  zone_contacts: {
+    north_zone: "0674-2301002",
+    south_west_zone: "0674-2552715",
+    south_east_zone: "0674-2431343"
+  },
+  total_wards: 67,
+  ward_numbers: [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+    21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+    31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+    41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
+    51, 52, 53, 54, 55, 56, 57, 58, 59, 60,
+    61, 62, 63, 64, 65, 66, 67
+  ]
+} as const;
+
+export const BMC_NUMBER = BMC_CONTACTS.main_contact_number;
+export const BMC_HELPLINE = BMC_CONTACTS.helpline_number;
+
 export const PROD_HOSTNAMES = ["ammaodisha.vercel.app", "ammaodisha.me", "www.ammaodisha.me"];
 export const IS_STAGING = typeof window !== "undefined" && !PROD_HOSTNAMES.includes(window.location.hostname);
 
