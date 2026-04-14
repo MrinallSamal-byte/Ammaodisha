@@ -1993,6 +1993,14 @@ a:focus-visible {
 }
 
 /* NammaKasa-inspired public app shell: stacked controls, map-first surface, full-width action rail. */
+.app-frame {
+  --civic-offset: 41px;
+}
+
+.app-frame.civic-hidden {
+  --civic-offset: 0px;
+}
+
 .topbar {
   min-height: calc(var(--safe-top) + 57px);
   align-items: center;
@@ -2101,7 +2109,7 @@ a:focus-visible {
 }
 
 .control-dock {
-  top: calc(var(--safe-top) + 98px);
+  top: calc(var(--safe-top) + 57px + var(--civic-offset));
   left: 0;
   right: 0;
   display: grid;
@@ -2163,14 +2171,14 @@ a:focus-visible {
 
 .map-shell {
   inset: auto;
-  top: calc(var(--safe-top) + 144px);
+  top: calc(var(--safe-top) + 103px + var(--civic-offset));
   right: 0;
   bottom: calc(max(var(--safe-bottom), 8px) + 67px);
   left: 0;
 }
 
 .stats-strip {
-  top: calc(var(--safe-top) + 157px);
+  top: calc(var(--safe-top) + 116px + var(--civic-offset));
   right: auto;
   left: 28px;
   gap: 0;
@@ -2224,7 +2232,7 @@ a:focus-visible {
 }
 
 .list-overlay {
-  top: calc(var(--safe-top) + 143px);
+  top: calc(var(--safe-top) + 102px + var(--civic-offset));
   left: 0;
   right: 0;
   bottom: calc(max(var(--safe-bottom), 8px) + 67px);
@@ -2437,15 +2445,15 @@ a:focus-visible {
 
 @media (min-width: 1040px) {
   .control-dock {
-    top: calc(var(--safe-top) + 98px);
+    top: calc(var(--safe-top) + 57px + var(--civic-offset));
   }
 
   .stats-strip {
-    top: calc(var(--safe-top) + 157px);
+    top: calc(var(--safe-top) + 116px + var(--civic-offset));
   }
 
   .list-overlay {
-    top: calc(var(--safe-top) + 143px);
+    top: calc(var(--safe-top) + 102px + var(--civic-offset));
   }
 }
 
@@ -2526,7 +2534,7 @@ a:focus-visible {
   }
 
   .stats-strip {
-    top: calc(var(--safe-top) + 157px);
+    top: calc(var(--safe-top) + 116px + var(--civic-offset));
     left: 28px;
     max-width: calc(100vw - 24px);
   }
@@ -2538,7 +2546,7 @@ a:focus-visible {
   }
 
   .list-overlay {
-    top: calc(var(--safe-top) + 143px);
+    top: calc(var(--safe-top) + 102px + var(--civic-offset));
     left: 0;
     right: 0;
   }
@@ -2593,16 +2601,16 @@ a:focus-visible {
   }
 
   .control-dock {
-    top: calc(var(--safe-top) + 98px);
+    top: calc(var(--safe-top) + 57px + var(--civic-offset));
   }
 
   .stats-strip {
-    top: calc(var(--safe-top) + 157px);
+    top: calc(var(--safe-top) + 116px + var(--civic-offset));
     transform: none;
   }
 
   .list-overlay {
-    top: calc(var(--safe-top) + 143px);
+    top: calc(var(--safe-top) + 102px + var(--civic-offset));
   }
 
   .bottom-action-bar {

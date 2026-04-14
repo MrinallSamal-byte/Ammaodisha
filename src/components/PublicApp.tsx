@@ -267,7 +267,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   );
 
   return (
-    <div className="app-frame">
+    <div className={clsx("app-frame", !showCivicNotice && "civic-hidden")}>
       <MapView
         reports={visibleReports}
         wardBoundaries={data.wardBoundaries}
