@@ -1,14 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AdminPanel } from "./components/AdminPanel";
-import { PublicApp } from "./components/PublicApp";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { backend } from "./services/backend";
 import type { CivicData } from "./types/domain";
+
+const AdminPanel = lazy(async () => ({ default: (await import("./components/AdminPanel")).AdminPanel }));
+const PublicApp = lazy(async () => ({ default: (await import("./components/PublicApp")).PublicApp }));
+
+function safeDecode(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
 
 function parseRoute(pathname: string) {
   const parts = pathname.split("/").filter(Boolean);
   if (!parts.length || parts[0] === "admin") return null;
   if (["report", "ward", "mla", "mp"].includes(parts[0]) && parts[1]) {
-    return { type: parts[0] as "report" | "ward" | "mla" | "mp", id: decodeURIComponent(parts.slice(1).join("/")) };
+    return { type: parts[0] as "report" | "ward" | "mla" | "mp", id: safeDecode(parts.slice(1).join("/")) };
   }
   return null;
 }
@@ -43,7 +52,20 @@ export default function App() {
   const routeSelection = useMemo(() => parseRoute(path), [path]);
 
   // Admin panel is independent — render before any civic-data guards.
-  if (isAdmin) return <AdminPanel />;
+  if (isAdmin) {
+    return (
+      <Suspense
+        fallback={
+          <main className="loading-state">
+            <img src="/Favicon.svg" alt="" />
+            <p>Loading admin panel...</p>
+          </main>
+        }
+      >
+        <AdminPanel />
+      </Suspense>
+    );
+  }
 
   if (error) {
     return (
@@ -65,5 +87,16 @@ export default function App() {
     );
   }
 
-  return <PublicApp data={data} routeSelection={routeSelection} onDataChange={setData} navigate={navigate} />;
+  return (
+    <Suspense
+      fallback={
+        <main className="loading-state">
+          <img src="/Favicon.svg" alt="" />
+          <p>Loading map experience...</p>
+        </main>
+      }
+    >
+      <PublicApp data={data} routeSelection={routeSelection} onDataChange={setData} navigate={navigate} />
+    </Suspense>
+  );
 }

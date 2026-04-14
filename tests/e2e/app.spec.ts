@@ -7,7 +7,7 @@ test("public map shell loads", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("button", { name: /About Amma Odisha/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /Report Garbage/i })).toBeVisible();
-  await expect(page.getByLabel("Amma Odisha civic reporting context")).toContainText("Public garbage map");
+  await expect(page.getByLabel("Amma Odisha civic reporting context")).toContainText("ward accountability across Bhubaneswar");
   await expect(page.getByRole("button", { name: /Open Amma Odisha insights/i })).toBeVisible();
 });
 

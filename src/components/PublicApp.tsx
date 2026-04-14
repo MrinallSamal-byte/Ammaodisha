@@ -23,13 +23,12 @@ import {
   Trophy,
   X
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { MapView } from "./MapView";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CHANGELOG, CATEGORIES, SEVERITY, STATUS_LABELS } from "../services/constants";
 import { backend } from "../services/backend";
 import { findNearestWard, findWardInGeoJson, isInsideCity } from "../services/geo";
 import { canSubmitReport, hasUpvoted } from "../services/limits";
-import { generateBMCComplaint, getReportShareText, getWhatsAppUrl } from "../services/share";
+import { generateBMCComplaint, getReportShareText, getWhatsAppUrl, shareOrCopy } from "../services/share";
 import { daysActive, timeAgo } from "../services/time";
 import type {
   CivicData,
@@ -40,6 +39,8 @@ import type {
   Ward,
   WasteCategory
 } from "../types/domain";
+
+const MapView = lazy(async () => ({ default: (await import("./MapView")).MapView }));
 
 type RouteSelection =
   | { type: "report"; id: string }
@@ -81,6 +82,22 @@ function getWardSelectLabel(ward: Ward) {
   return distinctName ? `Ward ${ward.ward_number} - ${distinctName}` : `Ward ${ward.ward_number}`;
 }
 
+function readStorageValue(key: string) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorageValue(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage write failures (private mode/quota exceeded).
+  }
+}
+
 export function PublicApp({ data, routeSelection, onDataChange, navigate }: PublicAppProps) {
   const [reports, setReports] = useState(data.reports);
   const [selectedReport, setSelectedReport] = useState<GarbageReport | null>(null);
@@ -93,10 +110,10 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   const [wardFilterState, setWardFilterState] = useState<"idle" | "locating" | "error">("idle");
   const [showReportForm, setShowReportForm] = useState(false);
   const [showInsights, setShowInsights] = useState(false);
-  const [showIntro, setShowIntro] = useState(() => localStorage.getItem("nk_intro_seen") !== "1");
+  const [showIntro, setShowIntro] = useState(() => readStorageValue("nk_intro_seen") !== "1");
   const [showAbout, setShowAbout] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
-  const [showCivicNotice, setShowCivicNotice] = useState(() => localStorage.getItem("nk_civic_hidden") !== "1");
+  const [showCivicNotice, setShowCivicNotice] = useState(() => readStorageValue("nk_civic_hidden") !== "1");
   const [viewMode, setViewMode] = useState<"map" | "list">("map");
   const [severityFilter, setSeverityFilter] = useState<"all" | SeverityKey>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "unresolved" | "resolved">("all");
@@ -195,7 +212,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   };
 
   const dismissIntro = () => {
-    localStorage.setItem("nk_intro_seen", "1");
+    writeStorageValue("nk_intro_seen", "1");
     setShowIntro(false);
   };
 
@@ -268,14 +285,24 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
 
   return (
     <div className={clsx("app-frame", !showCivicNotice && "civic-hidden")}>
-      <MapView
-        reports={visibleReports}
-        wardBoundaries={data.wardBoundaries}
-        onSelectReport={handleMapReportSelect}
-        onSelectWard={handleMapWardSelect}
-        focusWardNumber={focusWardNumber}
-        focusRequestId={focusRequestId}
-      />
+      {viewMode === "map" && (
+        <Suspense
+          fallback={
+            <div className="map-shell map-loading-shell" aria-label="Loading map">
+              <div className="map-loading-pill">Loading map...</div>
+            </div>
+          }
+        >
+          <MapView
+            reports={visibleReports}
+            wardBoundaries={data.wardBoundaries}
+            onSelectReport={handleMapReportSelect}
+            onSelectWard={handleMapWardSelect}
+            focusWardNumber={focusWardNumber}
+            focusRequestId={focusRequestId}
+          />
+        </Suspense>
+      )}
 
       <header className="topbar safe-top">
         <button className="brand-chip" onClick={() => navigate("/")} aria-label="Go to Amma Odisha map">
@@ -319,7 +346,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
             Report, verify, and track ward accountability across Bhubaneswar. →{" "}
             <a href="https://ammaodisha.me" target="_blank" rel="noreferrer"><strong>ammaodisha.me</strong></a>
           </span>
-          <button type="button" className="civic-dismiss" onClick={() => { localStorage.setItem("nk_civic_hidden", "1"); setShowCivicNotice(false); }} aria-label="Dismiss notice">
+          <button type="button" className="civic-dismiss" onClick={() => { writeStorageValue("nk_civic_hidden", "1"); setShowCivicNotice(false); }} aria-label="Dismiss notice">
             <X size={14} />
           </button>
         </section>
@@ -594,6 +621,15 @@ function ReportList({
   representatives?: Representative[];
   onSelect: (report: GarbageReport) => void;
 }) {
+  const wardsByNumber = useMemo(() => new Map(wards.map((ward) => [ward.ward_number, ward])), [wards]);
+  const mlaByConstituency = useMemo(() => {
+    const map = new Map<string, Representative>();
+    (representatives ?? []).forEach((rep) => {
+      if (rep.role === "mla") map.set(rep.constituency, rep);
+    });
+    return map;
+  }, [representatives]);
+
   return (
     <div className="report-list">
       <div className="report-list-header">
@@ -604,18 +640,11 @@ function ReportList({
         <span className="pill red">Public</span>
       </div>
       {reports.length ? (
-        reports.map((report) => (
-          <ReportListItem
-            key={report.id}
-            report={report}
-            ward={wards.find((ward) => ward.ward_number === report.ward_number)}
-            mla={representatives?.find((rep) => {
-              const w = wards.find((ward) => ward.ward_number === report.ward_number);
-              return rep.role === "mla" && w && rep.constituency === w.assembly_constituency;
-            })}
-            onSelect={onSelect}
-          />
-        ))
+        reports.map((report) => {
+          const ward = wardsByNumber.get(report.ward_number);
+          const mla = ward ? mlaByConstituency.get(ward.assembly_constituency) : undefined;
+          return <ReportListItem key={report.id} report={report} ward={ward} mla={mla} onSelect={onSelect} />;
+        })
       ) : (
         <p className="empty">No reports yet. Be the first to report a garbage dump in your area!</p>
       )}
@@ -712,10 +741,11 @@ function ReportDetail({
   const shareReport = async () => {
     const url = `${location.origin}/report/${report.id}`;
     const text = getReportShareText(report, ward, mla);
-    if (navigator.share) {
-      await navigator.share({ title: `Garbage Report — ${ward?.ward_name ?? "Bhubaneswar"}`, text, url });
-    } else {
-      await navigator.clipboard?.writeText(url);
+    try {
+      await shareOrCopy({ title: `Garbage Report — ${ward?.ward_name ?? "Bhubaneswar"}`, text, url }, url);
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      console.error("Share failed", caught);
     }
   };
 
@@ -1279,14 +1309,14 @@ function ChangelogSheet({ onClose }: { onClose: () => void }) {
 }
 
 function TelegramToast() {
-  const [hidden, setHidden] = useState(() => localStorage.getItem("nk_telegram_hidden") === "1");
+  const [hidden, setHidden] = useState(() => readStorageValue("nk_telegram_hidden") === "1");
   if (hidden) return null;
   return (
     <div className="telegram-toast">
       <button
         className="toast-close"
         onClick={() => {
-          localStorage.setItem("nk_telegram_hidden", "1");
+          writeStorageValue("nk_telegram_hidden", "1");
           setHidden(true);
         }}
         aria-label="Dismiss Telegram community toast"

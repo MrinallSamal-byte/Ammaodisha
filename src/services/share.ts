@@ -46,11 +46,30 @@ export function getWhatsAppUrl(message: string) {
   return `https://wa.me/${BMC_WHATSAPP}?text=${encodeURIComponent(message)}`;
 }
 
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.setAttribute("readonly", "true");
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  input.style.pointerEvents = "none";
+  document.body.append(input);
+  input.select();
+  const copied = document.execCommand("copy");
+  input.remove();
+  if (!copied) throw new Error("Clipboard unavailable");
+}
+
 export async function shareOrCopy(data: ShareData, fallbackUrl: string) {
   if (navigator.share) {
     await navigator.share(data);
     return "shared";
   }
-  await navigator.clipboard?.writeText(data.url ?? fallbackUrl);
+  await copyText(data.url ?? fallbackUrl);
   return "copied";
 }

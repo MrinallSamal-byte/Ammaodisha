@@ -4,7 +4,19 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "coverage", "node_modules", "supabase/functions", "*.config.d.ts", "*.tsbuildinfo"] },
+  {
+    ignores: [
+      "dist",
+      "coverage",
+      "node_modules",
+      "supabase/functions",
+      "*.config.d.ts",
+      "*.tsbuildinfo",
+      "test-db.mjs",
+      "test-upload.mjs",
+      "test_geo.js"
+    ]
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

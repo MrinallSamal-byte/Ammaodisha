@@ -10,6 +10,7 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const adminKey = Deno.env.get("ADMIN_KEY") ?? "";
 const supabase = createClient(supabaseUrl, serviceRoleKey);
+const MODERATION_STATUSES = new Set(["flagged", "approved", "rejected"]);
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -39,23 +40,32 @@ Deno.serve(async (request) => {
 });
 
 async function stats() {
-  const { count: total } = await supabase.from("garbage_reports").select("id", { count: "exact", head: true });
-  const { count: flagged } = await supabase
+  const { count: total, error: totalError } = await supabase.from("garbage_reports").select("id", { count: "exact", head: true });
+  if (totalError) throw totalError;
+
+  const { count: flagged, error: flaggedError } = await supabase
     .from("garbage_reports")
     .select("id", { count: "exact", head: true })
     .eq("moderation_status", "flagged");
-  const { count: rejected } = await supabase
+  if (flaggedError) throw flaggedError;
+
+  const { count: rejected, error: rejectedError } = await supabase
     .from("garbage_reports")
     .select("id", { count: "exact", head: true })
     .eq("moderation_status", "rejected");
-  const { count: approved } = await supabase
+  if (rejectedError) throw rejectedError;
+
+  const { count: approved, error: approvedError } = await supabase
     .from("garbage_reports")
     .select("id", { count: "exact", head: true })
     .eq("moderation_status", "approved");
+  if (approvedError) throw approvedError;
+
   return { total: total ?? 0, flagged: flagged ?? 0, rejected: rejected ?? 0, approved: approved ?? 0 };
 }
 
 async function queue(status: string) {
+  assertModerationStatus(status);
   const { data, error } = await supabase
     .from("garbage_reports")
     .select("*")
@@ -66,6 +76,7 @@ async function queue(status: string) {
 }
 
 async function moderate(reportId: string, decision: string) {
+  assertModerationStatus(decision);
   const { error } = await supabase
     .from("garbage_reports")
     .update({
@@ -78,6 +89,7 @@ async function moderate(reportId: string, decision: string) {
 }
 
 async function bulk(reportIds: string[], decision: string) {
+  assertModerationStatus(decision);
   const { error } = await supabase
     .from("garbage_reports")
     .update({
@@ -105,4 +117,10 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" }
   });
+}
+
+function assertModerationStatus(value: string): asserts value is "flagged" | "approved" | "rejected" {
+  if (!MODERATION_STATUSES.has(value)) {
+    throw new Error("Invalid moderation status");
+  }
 }

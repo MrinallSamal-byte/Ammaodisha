@@ -1,6 +1,7 @@
 import maplibregl, { type Map as MapLibreMap, type Marker } from "maplibre-gl";
 import { useEffect, useRef } from "react";
 import { CITY_CENTER, CITY_ZOOM, MAP_STYLE, SEVERITY } from "../services/constants";
+import { createMarkerPlacements } from "../services/map-markers";
 import type { GarbageReport, WardFeatureCollection } from "../types/domain";
 
 interface MapViewProps {
@@ -75,9 +76,8 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard,
     const map = mapRef.current;
     if (!map) return;
     markersRef.current.forEach((marker) => marker.remove());
-    markersRef.current = reports
-      .filter((report) => report.status !== "resolved")
-      .map((report) => {
+    const placements = createMarkerPlacements(reports, wardBoundaries);
+    markersRef.current = placements.map(({ report, latitude, longitude }) => {
         const markerEl = document.createElement("button");
         const markerDotEl = document.createElement("span");
         const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
@@ -112,10 +112,10 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard,
           onSelectReport(report);
         });
         return new maplibregl.Marker({ element: markerEl, anchor: "center" })
-          .setLngLat([Number(report.longitude), Number(report.latitude)])
+          .setLngLat([longitude, latitude])
           .addTo(map);
       });
-  }, [reports, onSelectReport]);
+  }, [reports, onSelectReport, wardBoundaries]);
 
   useEffect(() => {
     const map = mapRef.current;

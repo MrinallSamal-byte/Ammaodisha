@@ -21,6 +21,30 @@ import type { AdminStats, GarbageReport, ModerationStatus } from "../types/domai
 // when the browser tab is closed — it should not persist across sessions.
 const SESSION_KEY = "nk_admin_key";
 
+function readSessionValue(key: string) {
+  try {
+    return sessionStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeSessionValue(key: string, value: string) {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    // Ignore storage write failures.
+  }
+}
+
+function removeSessionValue(key: string) {
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    // Ignore storage write failures.
+  }
+}
+
 const tabs: { key: ModerationStatus; label: string }[] = [
   { key: "flagged", label: "Flagged" },
   { key: "rejected", label: "Rejected" },
@@ -37,7 +61,7 @@ const reasonLabels: Record<string, string> = {
 };
 
 export function AdminPanel() {
-  const [adminKey, setAdminKey] = useState(sessionStorage.getItem(SESSION_KEY) || "");
+  const [adminKey, setAdminKey] = useState(() => readSessionValue(SESSION_KEY));
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [stats, setStats] = useState<AdminStats | null>(null);
@@ -55,7 +79,7 @@ export function AdminPanel() {
     setLoginError("");
     try {
       const nextStats = await backend.adminStats(key);
-      sessionStorage.setItem(SESSION_KEY, key);
+      writeSessionValue(SESSION_KEY, key);
       setAdminKey(key);
       setStats(nextStats);
       setIsLoggedIn(true);
@@ -71,7 +95,7 @@ export function AdminPanel() {
   // the key expired or was rotated) we clear it so the login form is shown
   // instead of leaving the user stuck on a blank screen.
   useEffect(() => {
-    const key = sessionStorage.getItem(SESSION_KEY);
+    const key = readSessionValue(SESSION_KEY);
     if (!key) return;
     backend.adminStats(key).then((nextStats) => {
       setAdminKey(key);
@@ -80,7 +104,7 @@ export function AdminPanel() {
       return loadQueue("flagged", key);
     }).catch(() => {
       // Key is stale — remove it and show the login form.
-      sessionStorage.removeItem(SESSION_KEY);
+      removeSessionValue(SESSION_KEY);
     });
   // loadQueue is stable enough for a one-time mount effect; the key is passed
   // explicitly so there is no stale-closure risk here.
@@ -177,7 +201,7 @@ export function AdminPanel() {
         </div>
         <button
           onClick={() => {
-            sessionStorage.removeItem(SESSION_KEY);
+            removeSessionValue(SESSION_KEY);
             setIsLoggedIn(false);
           }}
           aria-label="Logout"

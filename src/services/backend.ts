@@ -336,6 +336,14 @@ function saveLocalReports(reports: GarbageReport[]) {
   }
 }
 
+function upsertLocalReports(nextReports: GarbageReport[]) {
+  if (!nextReports.length) return;
+  const byId = new Map<string, GarbageReport>();
+  readLocalReports().map(normalizeReport).forEach((report) => byId.set(report.id, report));
+  nextReports.map(normalizeReport).forEach((report) => byId.set(report.id, report));
+  saveLocalReports(Array.from(byId.values()).sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)));
+}
+
 // ─── Image utilities ──────────────────────────────────────────────────────────
 
 async function fileToDataUrl(file: File): Promise<string> {
@@ -461,8 +469,7 @@ class LocalBackend implements Backend {
 
     // Persist to localStorage first, then bust the in-memory cache so
     // subsequent fetchReports calls pick up the new report.
-    const existing = readLocalReports();
-    saveLocalReports([report, ...existing]);
+    upsertLocalReports([report]);
     this.data = undefined;
 
     recordSubmission();
@@ -470,25 +477,21 @@ class LocalBackend implements Backend {
   }
 
   async resolveReport(reportId: string, input: ResolveReportInput) {
-    const existing = readLocalReports();
-    let found: GarbageReport | undefined;
-    const updated = existing.map((report) => {
-      if (report.id !== reportId) return report;
-      found = {
-        ...report,
-        status: "resolved" as const,
-        resolved_at: new Date().toISOString(),
-        resolved_photo_url: input.photoUrl ?? null,
-        resolved_lat: input.lat,
-        resolved_lng: input.lng,
-        resolved_by_name: input.name || "Anonymous Citizen",
-        updated_at: new Date().toISOString()
-      };
-      return found;
-    });
+    const existing = (await this.fetchCivicData()).reports.find((report) => report.id === reportId);
+    if (!existing) throw new Error("Report not found");
 
-    if (!found) throw new Error("Report not found");
-    saveLocalReports(updated);
+    const found: GarbageReport = {
+      ...existing,
+      status: "resolved",
+      resolved_at: new Date().toISOString(),
+      resolved_photo_url: input.photoUrl ?? null,
+      resolved_lat: input.lat,
+      resolved_lng: input.lng,
+      resolved_by_name: input.name || "Anonymous Citizen",
+      updated_at: new Date().toISOString()
+    };
+
+    upsertLocalReports([found]);
     this.data = undefined;
     return found;
   }
@@ -496,16 +499,13 @@ class LocalBackend implements Backend {
   async upvoteReport(reportId: string) {
     if (hasUpvoted(reportId)) return { alreadyVoted: true };
 
-    const existing = readLocalReports();
-    let newCount: number | undefined;
-    const updated = existing.map((report) => {
-      if (report.id !== reportId) return report;
-      newCount = (report.upvote_count || 1) + 1;
-      return { ...report, upvote_count: newCount };
-    });
+    const existing = (await this.fetchCivicData()).reports.find((report) => report.id === reportId);
+    if (!existing) throw new Error("Report not found");
+
+    const newCount = (existing.upvote_count || 1) + 1;
+    upsertLocalReports([{ ...existing, upvote_count: newCount, updated_at: new Date().toISOString() }]);
 
     markUpvoted(reportId);
-    saveLocalReports(updated);
     this.data = undefined;
     return { alreadyVoted: false, newCount };
   }
@@ -516,7 +516,7 @@ class LocalBackend implements Backend {
 
   async adminStats(adminKey: string) {
     this.assertAdmin(adminKey);
-    const reports = await this.fetchReports();
+    const reports = (await this.fetchCivicData()).reports;
     return {
       total: reports.length,
       flagged: reports.filter((r) => r.moderation_status === "flagged").length,
@@ -527,18 +527,20 @@ class LocalBackend implements Backend {
 
   async adminQueue(adminKey: string, status: ModerationStatus) {
     this.assertAdmin(adminKey);
-    return (await this.fetchReports()).filter((r) => r.moderation_status === status);
+    return (await this.fetchCivicData()).reports.filter((r) => r.moderation_status === status);
   }
 
   async moderateReport(adminKey: string, reportId: string, decision: ModerationStatus) {
     this.assertAdmin(adminKey);
-    const existing = readLocalReports();
-    const updated = existing.map((r) =>
-      r.id === reportId
-        ? { ...r, moderation_status: decision, moderation_metadata: { ...(r.moderation_metadata ?? {}), moderated_at: new Date().toISOString() } }
-        : r
-    );
-    saveLocalReports(updated);
+    const report = (await this.fetchCivicData()).reports.find((item) => item.id === reportId);
+    if (!report) throw new Error("Report not found");
+    upsertLocalReports([
+      {
+        ...report,
+        moderation_status: decision,
+        moderation_metadata: { ...(report.moderation_metadata ?? {}), moderated_at: new Date().toISOString() }
+      }
+    ]);
     this.data = undefined;
   }
 
@@ -546,14 +548,12 @@ class LocalBackend implements Backend {
     // Single read-modify-write pass for efficiency.
     this.assertAdmin(adminKey);
     const idSet = new Set(reportIds);
-    const existing = readLocalReports();
+    const reports = (await this.fetchCivicData()).reports;
     const now = new Date().toISOString();
-    const updated = existing.map((r) =>
-      idSet.has(r.id)
-        ? { ...r, moderation_status: decision, moderation_metadata: { ...(r.moderation_metadata ?? {}), moderated_at: now } }
-        : r
-    );
-    saveLocalReports(updated);
+    const updated = reports
+      .filter((r) => idSet.has(r.id))
+      .map((r) => ({ ...r, moderation_status: decision, moderation_metadata: { ...(r.moderation_metadata ?? {}), moderated_at: now } }));
+    upsertLocalReports(updated);
     this.data = undefined;
   }
 
@@ -561,14 +561,14 @@ class LocalBackend implements Backend {
     // Approve incoming, reject original — single pass.
     this.assertAdmin(adminKey);
     const decisions = new Map<string, ModerationStatus>([[reportId, "approved"], [existingId, "rejected"]]);
-    const existing = readLocalReports();
+    const reports = (await this.fetchCivicData()).reports;
     const now = new Date().toISOString();
-    const updated = existing.map((r) => {
+    const updated = reports.flatMap((r) => {
       const decision = decisions.get(r.id);
-      if (!decision) return r;
-      return { ...r, moderation_status: decision, moderation_metadata: { ...(r.moderation_metadata ?? {}), moderated_at: now } };
+      if (!decision) return [];
+      return [{ ...r, moderation_status: decision, moderation_metadata: { ...(r.moderation_metadata ?? {}), moderated_at: now } }];
     });
-    saveLocalReports(updated);
+    upsertLocalReports(updated);
     this.data = undefined;
   }
 
@@ -689,31 +689,26 @@ class SupabaseBackend extends LocalBackend {
 
   override async upvoteReport(reportId: string) {
     const voter = getFingerprint();
-    const { data: existing } = await this.client
-      .from("report_upvotes")
-      .select("id")
-      .eq("report_id", reportId)
-      .eq("voter_fingerprint", voter)
-      .maybeSingle();
-    if (existing) return { alreadyVoted: true };
-
     const { error } = await this.client
       .from("report_upvotes")
       .insert({ report_id: reportId, voter_fingerprint: voter });
-    if (error) throw error;
+    if (error) {
+      const code = (error as { code?: string }).code;
+      if (code === "23505") {
+        markUpvoted(reportId);
+        return { alreadyVoted: true };
+      }
+      throw error;
+    }
 
-    // Read-then-increment: a concurrent upvote between these two statements
-    // can cause a lost update. The correct fix is a Postgres function:
-    //   create function increment_upvote(rid uuid) returns int ...
-    // and calling it via this.client.rpc('increment_upvote', { rid: reportId }).
-    // For now we accept the rare race; upvote_count is cosmetic, not financial.
-    const currentReport = await this.fetchReportById(reportId);
-    const newCount = (currentReport?.upvote_count ?? 1) + 1;
-    const { error: incError } = await this.client
+    const { data: report, error: reportError } = await this.client
       .from("garbage_reports")
-      .update({ upvote_count: newCount })
-      .eq("id", reportId);
-    if (incError) throw incError;
+      .select("upvote_count")
+      .eq("id", reportId)
+      .maybeSingle();
+    if (reportError) throw reportError;
+
+    const newCount = Number(report?.upvote_count ?? 1);
 
     markUpvoted(reportId);
     return { alreadyVoted: false, newCount };
