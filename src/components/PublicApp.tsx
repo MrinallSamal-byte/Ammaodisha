@@ -7,6 +7,7 @@ import {
   ChevronDown,
   CircleAlert,
   Home,
+  Info,
   Layers,
   List,
   LoaderCircle,
@@ -22,7 +23,7 @@ import {
   Trophy,
   X
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MapView } from "./MapView";
 import { CHANGELOG, CATEGORIES, SEVERITY, STATUS_LABELS } from "../services/constants";
 import { backend } from "../services/backend";
@@ -99,6 +100,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   const [viewMode, setViewMode] = useState<"map" | "list">("map");
   const [severityFilter, setSeverityFilter] = useState<"all" | SeverityKey>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "unresolved" | "resolved">("all");
+  const [refreshing, setRefreshing] = useState(false);
 
   const wardsByNumber = useMemo(() => new globalThis.Map(data.wards.map((ward) => [ward.ward_number, ward])), [data.wards]);
 
@@ -106,13 +108,25 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
     setReports(data.reports);
   }, [data.reports]);
 
+  // Sync modal visibility with browser navigation (back/forward buttons).
+  // When the URL returns to "/" (routeSelection === null) any open detail panel
+  // should close so the UI and URL stay in sync.
+  // Both selectedReport AND selectedProfile are cleared in each branch to
+  // prevent two modals rendering simultaneously when navigating between routes
+  // (e.g. /report/abc → /ward/5 must close ReportDetail before opening ProfileSheet).
   useEffect(() => {
-    if (!routeSelection) return;
+    if (!routeSelection) {
+      setSelectedReport(null);
+      setSelectedProfile(null);
+      return;
+    }
     if (routeSelection.type === "report") {
       const report = reports.find((item) => item.id === routeSelection.id);
       if (report) setSelectedReport(report);
+      setSelectedProfile(null);
     } else {
       setSelectedProfile(routeSelection);
+      setSelectedReport(null);
     }
   }, [reports, routeSelection]);
 
@@ -148,10 +162,20 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   const worstWards = useMemo(() => getWorstWards(filteredReports, data.wards), [filteredReports, data.wards]);
   const filteredWard = wardFilterNumber != null ? wardsByNumber.get(wardFilterNumber) : null;
 
+  // Refresh: surface errors as a brief visual indicator rather than silently failing.
   const refreshReports = async () => {
-    const nextReports = await backend.fetchReports();
-    setReports(nextReports);
-    onDataChange({ ...data, reports: nextReports });
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const nextReports = await backend.fetchReports();
+      setReports(nextReports);
+      onDataChange({ ...data, reports: nextReports });
+    } catch (err) {
+      console.error("Refresh failed", err);
+      // Data remains unchanged; we do not wipe existing reports on fetch failure.
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const updateReport = (updated: GarbageReport) => {
@@ -259,10 +283,28 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
             <strong>
               Amma <b>Odisha</b>
             </strong>
-            <small>v0.3.0</small>
+            {/* Version badge — opens the changelog on click */}
+            <small
+              role="button"
+              tabIndex={0}
+              style={{ cursor: "pointer", textDecoration: "underline dotted" }}
+              title="View changelog"
+              onClick={(e) => { e.stopPropagation(); setShowChangelog(true); }}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); setShowChangelog(true); } }}
+            >
+              v0.3.0
+            </small>
           </span>
         </button>
         <div className="topbar-actions">
+          <button
+            className="icon-button"
+            onClick={() => setShowAbout(true)}
+            aria-label="About Amma Odisha"
+            title="About"
+          >
+            <Info size={17} />
+          </button>
           <a className="icon-button" href="https://x.com/MrinallSamal" target="_blank" rel="noreferrer" aria-label="Follow on X">
             <X size={17} />
           </a>
@@ -329,8 +371,14 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
             <X size={14} />
             Clear
           </button>
-          <button className="chip-button refresh-chip" onClick={refreshReports} type="button">
-            <RefreshCw size={14} />
+          <button
+            className="chip-button refresh-chip"
+            onClick={() => void refreshReports()}
+            type="button"
+            disabled={refreshing}
+            aria-label="Refresh reports"
+          >
+            {refreshing ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
             Refresh
           </button>
         </div>
@@ -362,7 +410,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
       </footer>
 
       {showIntro && <IntroOverlay onClose={dismissIntro} />}
-      {showAbout && <AboutSheet onClose={() => setShowAbout(false)} />}
+      {showAbout && <AboutSheet onClose={() => setShowAbout(false)} onOpenChangelog={() => { setShowAbout(false); setShowChangelog(true); }} />}
       {showChangelog && <ChangelogSheet onClose={() => setShowChangelog(false)} />}
       {showInsights && (
         <InsightsSheet
@@ -722,11 +770,11 @@ function ReportDetail({
           </div>
 
           <div className="action-grid">
-            <button onClick={upvote} disabled={upvoted || isUpvoting}>
+            <button onClick={() => void upvote()} disabled={upvoted || isUpvoting}>
               {isUpvoting ? <LoaderCircle className="spin" size={16} /> : <ThumbsUp size={16} />}
               {upvoted ? "Upvoted" : "Upvote"}
             </button>
-            <button onClick={shareReport}>
+            <button onClick={() => void shareReport()}>
               <Share2 size={16} />
               Share
             </button>
@@ -791,12 +839,30 @@ function Avatar({ rep }: { rep?: Representative }) {
   return <span className="avatar initials">{initials}</span>;
 }
 
+type ResolveStatus = "idle" | "locating" | "verified" | "mismatch" | "saving" | "error";
+
 function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; onClose: () => void; onResolved: (report: GarbageReport) => void }) {
   const [photo, setPhoto] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [status, setStatus] = useState<"idle" | "locating" | "verified" | "mismatch" | "saving">("idle");
+  const [status, setStatus] = useState<ResolveStatus>("idle");
+  const [saveError, setSaveError] = useState("");
+
+  // Clean up object URLs to prevent memory leaks
+  const previewRef = useRef<string | null>(null);
+  useEffect(() => {
+    return () => {
+      if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    };
+  }, []);
 
   const verify = async () => {
+    setSaveError("");
+
+    if (!navigator.geolocation) {
+      setStatus("mismatch");
+      return;
+    }
+
     setStatus("locating");
     navigator.geolocation.getCurrentPosition(
       async (position) => {
@@ -808,10 +874,15 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
           return;
         }
         setStatus("saving");
-        const photoUrl = photo ? await backend.uploadReportPhoto(photo) : null;
-        const resolved = await backend.resolveReport(report.id, { photoUrl, lat, lng });
-        onResolved(resolved);
-        onClose();
+        try {
+          const photoUrl = photo ? await backend.uploadReportPhoto(photo) : null;
+          const resolved = await backend.resolveReport(report.id, { photoUrl, lat, lng });
+          onResolved(resolved);
+          onClose();
+        } catch (caught) {
+          setSaveError(caught instanceof Error ? caught.message : "Save failed. Please try again.");
+          setStatus("error");
+        }
       },
       () => setStatus("mismatch"),
       { enableHighAccuracy: true, timeout: 8000 }
@@ -820,14 +891,20 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
 
   const onFile = (file?: File) => {
     if (!file) return;
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    const url = URL.createObjectURL(file);
+    previewRef.current = url;
     setPhoto(file);
-    setPreview(URL.createObjectURL(file));
+    setPreview(url);
   };
+
+  const isBusy = status === "locating" || status === "saving";
+  const canRetry = status === "mismatch" || status === "error";
 
   return (
     <div className="nested-modal">
       <article className="mini-card">
-        <button className="close-button" onClick={onClose}>
+        <button className="close-button" onClick={onClose} aria-label="Close resolve modal">
           <X size={18} />
         </button>
         <h2>Mark as Cleaned</h2>
@@ -837,15 +914,18 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
           <span>{preview ? "Tap to Retake" : "Take a Verification Photo"}</span>
           <input type="file" accept="image/*" capture="environment" onChange={(event) => onFile(event.target.files?.[0])} />
         </label>
-        <button className="primary-cta" onClick={verify} disabled={status === "locating" || status === "saving"}>
-          {status === "locating" || status === "saving" ? <LoaderCircle className="spin" size={17} /> : <CheckCircle2 size={17} />}
+        <button className="primary-cta" onClick={() => void verify()} disabled={isBusy}>
+          {isBusy ? <LoaderCircle className="spin" size={17} /> : <CheckCircle2 size={17} />}
           {status === "idle" && "Show that this spot is now clean"}
           {status === "locating" && "Verifying your location..."}
           {status === "saving" && "Saving verification..."}
-          {status === "mismatch" && "Try Again"}
+          {canRetry && "Try Again"}
         </button>
         {status === "mismatch" && (
-          <p className="warning-text">Location Mismatch. You seem to be far from the original report location.</p>
+          <p className="warning-text">Location mismatch — you appear to be more than 500 m from the original report.</p>
+        )}
+        {status === "error" && saveError && (
+          <p className="warning-text">{saveError}</p>
         )}
       </article>
     </div>
@@ -866,6 +946,19 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
   const [error, setError] = useState("");
   const limit = canSubmitReport();
   const selectedWard = detectedWard ?? data.wards.find((ward) => ward.ward_number === Number(wardNumber));
+
+  // Track the current object URL so we can revoke it when the user picks a
+  // new photo (preventing Blob URL memory leaks on repeated retakes).
+  const photoPreviewRef = useRef<string | null>(null);
+  useEffect(() => {
+    return () => {
+      if (photoPreviewRef.current) URL.revokeObjectURL(photoPreviewRef.current);
+    };
+  }, []);
+
+  // Stable ref so detectWard can be called from the mount effect without
+  // being listed in its dependency array (runs once on open, like componentDidMount).
+  const detectWardRef = useRef<() => void>();
 
   const detectWard = () => {
     if (!navigator.geolocation) {
@@ -898,14 +991,20 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
     );
   };
 
+  detectWardRef.current = detectWard;
+
   // Run once on mount so the form immediately mirrors the live GPS-first UX.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => detectWard(), []);
+  useEffect(() => {
+    detectWardRef.current?.();
+  }, []);
 
   const onFile = (file?: File) => {
     if (!file) return;
+    if (photoPreviewRef.current) URL.revokeObjectURL(photoPreviewRef.current);
+    const url = URL.createObjectURL(file);
+    photoPreviewRef.current = url;
     setPhoto(file);
-    setPhotoPreview(URL.createObjectURL(file));
+    setPhotoPreview(url);
   };
 
   const submit = async () => {
@@ -1037,7 +1136,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
         </label>
         <div className="form-footer">
           {error && <p className="warning-text">{error}</p>}
-          <button className="primary-cta" onClick={submit} disabled={submitting}>
+          <button className="primary-cta" onClick={() => void submit()} disabled={submitting}>
             {submitting ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
             {submitting ? "Submitting..." : "Report Garbage"}
           </button>
@@ -1078,7 +1177,7 @@ function ProfileSheet({
   return (
     <div className="modal-layer" onMouseDown={onClose}>
       <article className="profile-sheet" onMouseDown={(event) => event.stopPropagation()}>
-        <button className="close-button" onClick={onClose}>
+        <button className="close-button" onClick={onClose} aria-label="Close profile">
           <X size={18} />
         </button>
         <div className="profile-hero">
@@ -1107,17 +1206,17 @@ function ProfileSheet({
           </div>
         )}
         <h3>Top Locations</h3>
-        <ReportList reports={profileReports} wards={data.wards} onSelect={onSelectReport} />
+        <ReportList reports={profileReports} wards={data.wards} representatives={data.representatives} onSelect={onSelectReport} />
       </article>
     </div>
   );
 }
 
-function AboutSheet({ onClose }: { onClose: () => void }) {
+function AboutSheet({ onClose, onOpenChangelog }: { onClose: () => void; onOpenChangelog: () => void }) {
   return (
     <div className="modal-layer top" onMouseDown={onClose}>
       <article className="top-sheet" onMouseDown={(event) => event.stopPropagation()}>
-        <button className="close-button" onClick={onClose}>
+        <button className="close-button" onClick={onClose} aria-label="Close about">
           <X size={18} />
         </button>
         <h2>Why Amma Odisha?</h2>
@@ -1138,6 +1237,13 @@ function AboutSheet({ onClose }: { onClose: () => void }) {
           <a href="https://ammaodisha.me" target="_blank" rel="noreferrer">
             ammaodisha.me
           </a>
+          <button
+            className="secondary-cta"
+            style={{ minHeight: 38, fontSize: 12 }}
+            onClick={onOpenChangelog}
+          >
+            View Changelog
+          </button>
         </div>
       </article>
     </div>
@@ -1148,7 +1254,7 @@ function ChangelogSheet({ onClose }: { onClose: () => void }) {
   return (
     <div className="modal-layer" onMouseDown={onClose}>
       <article className="profile-sheet small" onMouseDown={(event) => event.stopPropagation()}>
-        <button className="close-button" onClick={onClose}>
+        <button className="close-button" onClick={onClose} aria-label="Close changelog">
           <X size={18} />
         </button>
         <h2>Changelog</h2>

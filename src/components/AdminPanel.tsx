@@ -17,6 +17,10 @@ import { SEVERITY } from "../services/constants";
 import { timeAgo } from "../services/time";
 import type { AdminStats, GarbageReport, ModerationStatus } from "../types/domain";
 
+// Admin key is stored in sessionStorage (not localStorage) so it is cleared
+// when the browser tab is closed — it should not persist across sessions.
+const SESSION_KEY = "nk_admin_key";
+
 const tabs: { key: ModerationStatus; label: string }[] = [
   { key: "flagged", label: "Flagged" },
   { key: "rejected", label: "Rejected" },
@@ -33,13 +37,14 @@ const reasonLabels: Record<string, string> = {
 };
 
 export function AdminPanel() {
-  const [adminKey, setAdminKey] = useState(localStorage.getItem("nk_admin_key") || "");
+  const [adminKey, setAdminKey] = useState(sessionStorage.getItem(SESSION_KEY) || "");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [queues, setQueues] = useState<Record<ModerationStatus, GarbageReport[]>>({ flagged: [], rejected: [], approved: [] });
   const [activeTab, setActiveTab] = useState<ModerationStatus>("flagged");
   const [loading, setLoading] = useState(false);
+  const [actionError, setActionError] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
   const [showTop, setShowTop] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -50,7 +55,7 @@ export function AdminPanel() {
     setLoginError("");
     try {
       const nextStats = await backend.adminStats(key);
-      localStorage.setItem("nk_admin_key", key);
+      sessionStorage.setItem(SESSION_KEY, key);
       setAdminKey(key);
       setStats(nextStats);
       setIsLoggedIn(true);
@@ -62,35 +67,62 @@ export function AdminPanel() {
     }
   };
 
+  // Attempt to restore a persisted admin session silently. On failure (e.g.
+  // the key expired or was rotated) we clear it so the login form is shown
+  // instead of leaving the user stuck on a blank screen.
   useEffect(() => {
-    const key = localStorage.getItem("nk_admin_key");
-    if (key) void login(key);
-    // Login is intentionally invoked once to restore persisted admin sessions.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const key = sessionStorage.getItem(SESSION_KEY);
+    if (!key) return;
+    backend.adminStats(key).then((nextStats) => {
+      setAdminKey(key);
+      setStats(nextStats);
+      setIsLoggedIn(true);
+      return loadQueue("flagged", key);
+    }).catch(() => {
+      // Key is stale — remove it and show the login form.
+      sessionStorage.removeItem(SESSION_KEY);
+    });
+  // loadQueue is stable enough for a one-time mount effect; the key is passed
+  // explicitly so there is no stale-closure risk here.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadQueue = async (status: ModerationStatus, key = adminKey) => {
     setLoading(true);
+    setActionError("");
     try {
       const [nextQueue, nextStats] = await Promise.all([backend.adminQueue(key, status), backend.adminStats(key)]);
       setQueues((current) => ({ ...current, [status]: nextQueue }));
       setStats(nextStats);
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "Failed to load queue. Please refresh.");
     } finally {
       setLoading(false);
     }
   };
 
   const action = async (reportId: string, decision: ModerationStatus) => {
-    await backend.moderateReport(adminKey, reportId, decision);
-    setQueues((current) => ({ ...current, [activeTab]: current[activeTab].filter((report) => report.id !== reportId) }));
-    setStats(await backend.adminStats(adminKey));
+    setActionError("");
+    try {
+      await backend.moderateReport(adminKey, reportId, decision);
+      setQueues((current) => ({ ...current, [activeTab]: current[activeTab].filter((report) => report.id !== reportId) }));
+      setStats(await backend.adminStats(adminKey));
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "Action failed. Please try again.");
+    }
   };
 
   const approveAll = async () => {
     const ids = queues[activeTab].map((report) => report.id);
-    await backend.bulkModerate(adminKey, ids, "approved");
-    setQueues((current) => ({ ...current, [activeTab]: [] }));
-    setStats(await backend.adminStats(adminKey));
+    if (!ids.length) return;
+    setActionError("");
+    try {
+      await backend.bulkModerate(adminKey, ids, "approved");
+      setQueues((current) => ({ ...current, [activeTab]: [] }));
+      setStats(await backend.adminStats(adminKey));
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "Bulk approve failed. Please try again.");
+    }
   };
 
   const queue = queues[activeTab];
@@ -107,7 +139,6 @@ export function AdminPanel() {
 
   useEffect(() => {
     if (isLoggedIn) void loadQueue(activeTab);
-    // Queue loading is keyed by the active tab and login state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, isLoggedIn]);
 
@@ -139,13 +170,14 @@ export function AdminPanel() {
       <header className="admin-header safe-top">
         <div>
           <img src="/logo.png" alt="Moderator" style={{ height: "30px", width: "auto" }} />
-          <button onClick={() => void loadQueue(activeTab)} className={clsx(loading && "spin")}>
-            <RefreshCw size={18} />
+          {/* Spin class targets the icon, not the button wrapper */}
+          <button onClick={() => void loadQueue(activeTab)} aria-label="Refresh queue">
+            <RefreshCw size={18} className={clsx(loading && "spin")} />
           </button>
         </div>
         <button
           onClick={() => {
-            localStorage.removeItem("nk_admin_key");
+            sessionStorage.removeItem(SESSION_KEY);
             setIsLoggedIn(false);
           }}
           aria-label="Logout"
@@ -177,6 +209,11 @@ export function AdminPanel() {
             </button>
           ))}
         </nav>
+        {actionError && (
+          <p className="warning-text" style={{ margin: "8px 16px", padding: "10px 12px", borderRadius: 8, background: "var(--primary-soft)" }}>
+            {actionError}
+          </p>
+        )}
         <section className="admin-cards">
           {activeTab === "flagged" && queue.length > 3 && (
             <button className="bulk-action" onClick={() => void approveAll()}>
@@ -210,12 +247,12 @@ export function AdminPanel() {
         </section>
       </div>
       {showTop && (
-        <button className="scroll-top" onClick={() => listRef.current?.scrollTo({ top: 0, behavior: "smooth" })}>
+        <button className="scroll-top" onClick={() => listRef.current?.scrollTo({ top: 0, behavior: "smooth" })} aria-label="Scroll to top">
           <ArrowUp size={18} />
         </button>
       )}
       {photo && (
-        <button className="photo-viewer" onClick={() => setPhoto(null)}>
+        <button className="photo-viewer" onClick={() => setPhoto(null)} aria-label="Close photo viewer">
           <img src={photo} alt="Report photo" />
           <span>
             <X size={20} />
@@ -270,15 +307,19 @@ function ModerationCard({
 
   const run = async (decision: ModerationStatus) => {
     setBusy(true);
-    await onAction(decision);
-    setBusy(false);
+    try {
+      await onAction(decision);
+    } finally {
+      // Reset busy even if the parent handler rejects (error shown at panel level).
+      setBusy(false);
+    }
   };
 
   return (
     <article className="moderation-card" style={{ animationDelay: `${index * 40}ms` }}>
       <div className="moderation-main">
         {report.photo_url ? (
-          <button onClick={() => onViewPhoto(report.photo_url!)}>
+          <button onClick={() => onViewPhoto(report.photo_url!)} aria-label="View full photo">
             <img src={report.photo_url} alt="" />
           </button>
         ) : (

@@ -51,8 +51,11 @@ export const STATUS_LABELS = {
   resolved: "Resolved"
 } as const;
 
+// BJD (Biju Janata Dal) added — dominant party in Odisha and present across
+// most Bhubaneswar wards. Without it, BJD reps fell through with no color.
 export const PARTY_COLORS: Record<string, string> = {
   BJP: "#FF6B00",
+  BJD: "#00a859",
   INC: "#00BFFF",
   JDS: "#00C853",
   AAP: "#5C6BC0"

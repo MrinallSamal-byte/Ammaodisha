@@ -58,7 +58,7 @@ function hasSupabaseConfig() {
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`Failed to fetch ${url}`);
+  if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
   return response.json() as Promise<T>;
 }
 
@@ -201,18 +201,12 @@ function getFallbackWard(sourceWardNumber: number, wards: Ward[]) {
 function getBhubaneswarAddress(ward: Ward) {
   const locality = ward.locality_name?.trim();
   const wardName = ward.ward_name?.trim() || "";
-  const normalizedWardName = wardName
-    .toLowerCase()
-    .replace(/\s+/g, " ");
+  const normalizedWardName = wardName.toLowerCase().replace(/\s+/g, " ");
   const match = normalizedWardName.match(/^ward(?:\s+no\.?)?[\s#:-]*0*(\d+)$/);
   const hasDistinctWardName = Boolean(wardName) && !(match && Number(match[1]) === ward.ward_number);
 
-  if (locality) {
-    return `${locality}, Ward ${ward.ward_number}, Bhubaneswar`;
-  }
-  if (hasDistinctWardName) {
-    return `${wardName}, Ward ${ward.ward_number}, Bhubaneswar`;
-  }
+  if (locality) return `${locality}, Ward ${ward.ward_number}, Bhubaneswar`;
+  if (hasDistinctWardName) return `${wardName}, Ward ${ward.ward_number}, Bhubaneswar`;
   return `Ward ${ward.ward_number}, Bhubaneswar`;
 }
 
@@ -242,18 +236,13 @@ function isPointInPolygon(point: [number, number], polygon: [number, number][][]
 
 function getPolygonBbox(polygon: [number, number][][]) {
   const outer = polygon[0] as [number, number][];
-  let minLng = Infinity;
-  let maxLng = -Infinity;
-  let minLat = Infinity;
-  let maxLat = -Infinity;
-
+  let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
   outer.forEach(([lng, lat]) => {
     if (lng < minLng) minLng = lng;
     if (lng > maxLng) maxLng = lng;
     if (lat < minLat) minLat = lat;
     if (lat > maxLat) maxLat = lat;
   });
-
   return { minLng, maxLng, minLat, maxLat };
 }
 
@@ -273,8 +262,7 @@ function getWardSamplePoint(wardNumber: number, reportId: string, boundaries: Wa
   const polygons = feature.geometry.type === "Polygon" ? [feature.geometry.coordinates] : feature.geometry.coordinates;
   if (!polygons.length) return null;
 
-  const polygonSeed = `${reportId}:${wardNumber}`;
-  const rng = mulberry32(hashString(polygonSeed));
+  const rng = mulberry32(hashString(`${reportId}:${wardNumber}`));
   const polygon = polygons[Math.floor(rng() * polygons.length)] as [number, number][][];
   const bounds = getPolygonBbox(polygon);
 
@@ -284,7 +272,6 @@ function getWardSamplePoint(wardNumber: number, reportId: string, boundaries: Wa
     const point: [number, number] = [lng, lat];
     if (isPointInPolygon(point, polygon)) return point;
   }
-
   return getPolygonCentroid(polygon);
 }
 
@@ -323,8 +310,18 @@ function normalizeReportsForBhubaneswar(reports: GarbageReport[], wards: Ward[],
   return reports.map((report) => normalizeToBhubaneswar(report, wards, boundaries));
 }
 
+// ─── localStorage helpers ─────────────────────────────────────────────────────
+
+function readLocalReports(): GarbageReport[] {
+  try {
+    return JSON.parse(localStorage.getItem(LOCAL_REPORTS_KEY) || "[]") as GarbageReport[];
+  } catch {
+    return [];
+  }
+}
+
 function mergeLocalReports(seed: GarbageReport[]) {
-  const local = JSON.parse(localStorage.getItem(LOCAL_REPORTS_KEY) || "[]") as GarbageReport[];
+  const local = readLocalReports();
   const byId = new Map<string, GarbageReport>();
   seed.map(normalizeReport).forEach((report) => byId.set(report.id, report));
   local.map(normalizeReport).forEach((report) => byId.set(report.id, report));
@@ -332,14 +329,20 @@ function mergeLocalReports(seed: GarbageReport[]) {
 }
 
 function saveLocalReports(reports: GarbageReport[]) {
-  localStorage.setItem(LOCAL_REPORTS_KEY, JSON.stringify(reports));
+  try {
+    localStorage.setItem(LOCAL_REPORTS_KEY, JSON.stringify(reports));
+  } catch {
+    // localStorage may be unavailable (quota exceeded, private browsing); fail silently.
+  }
 }
+
+// ─── Image utilities ──────────────────────────────────────────────────────────
 
 async function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
+    reader.onerror = () => reject(reader.error ?? new Error("FileReader error"));
     reader.readAsDataURL(file);
   });
 }
@@ -355,13 +358,8 @@ async function compressImage(file: File): Promise<File> {
       let { width, height } = image;
       const max = 1200;
       if (width > max || height > max) {
-        if (width > height) {
-          height = Math.round(height * (max / width));
-          width = max;
-        } else {
-          width = Math.round(width * (max / height));
-          height = max;
-        }
+        if (width > height) { height = Math.round(height * (max / width)); width = max; }
+        else { width = Math.round(width * (max / height)); height = max; }
       }
       const canvas = document.createElement("canvas");
       canvas.width = width;
@@ -369,23 +367,19 @@ async function compressImage(file: File): Promise<File> {
       canvas.getContext("2d")?.drawImage(image, 0, 0, width, height);
       canvas.toBlob(
         (blob) => {
-          if (!blob) {
-            resolve(file);
-            return;
-          }
+          if (!blob) { resolve(file); return; }
           resolve(new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg", lastModified: Date.now() }));
         },
         "image/jpeg",
         0.75
       );
     };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(file);
-    };
+    image.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
     image.src = url;
   });
 }
+
+// ─── LocalBackend ─────────────────────────────────────────────────────────────
 
 class LocalBackend implements Backend {
   private data?: CivicData;
@@ -395,7 +389,7 @@ class LocalBackend implements Backend {
       const [wardSeed, wardBoundaries, representativeSeed, reports, politicalMapping] = await Promise.all([
         fetchJson<Ward[]>("/wards.json"),
         fetchJson<WardFeatureCollection>("/ward-boundaries.json"),
-        fetchJson<Representative[]>("/representatives.json").catch(() => []),
+        fetchJson<Representative[]>("/representatives.json").catch(() => [] as Representative[]),
         fetchJson<GarbageReport[]>("/reports.json"),
         fetchJson<PoliticalMappingData>("/bbsr-political-mapping.json").catch(() => null)
       ]);
@@ -415,6 +409,7 @@ class LocalBackend implements Backend {
 
   async fetchReports() {
     const data = await this.fetchCivicData();
+    // Re-merge from localStorage so in-session submissions are always reflected.
     const reports = normalizeReportsForBhubaneswar(mergeLocalReports(data.reports), data.wards, data.wardBoundaries);
     return reports.filter((report) => report.moderation_status !== "rejected");
   }
@@ -429,6 +424,9 @@ class LocalBackend implements Backend {
 
   async fetchReportsByConstituency(constituency: string, type: "mla" | "mp") {
     const data = await this.fetchCivicData();
+    // Use fetchReports() (which re-merges localStorage) rather than data.reports
+    // so that in-session submissions appear in constituency/MLA/MP profile views.
+    const allReports = await this.fetchReports();
     const wardNumbers = new Set(
       data.wards
         .filter((ward) =>
@@ -436,12 +434,13 @@ class LocalBackend implements Backend {
         )
         .map((ward) => ward.ward_number)
     );
-    return data.reports.filter((report) => wardNumbers.has(report.ward_number));
+    return allReports.filter((report) => wardNumbers.has(report.ward_number));
   }
 
   async submitReport(input: NewReportInput) {
     const limit = canSubmitReport();
     if (!limit.allowed) throw new Error("Daily limit of 5 reports reached. Try again tomorrow.");
+
     const report: GarbageReport = {
       ...input,
       id: crypto.randomUUID(),
@@ -459,45 +458,56 @@ class LocalBackend implements Backend {
       },
       flag_count: 0
     };
-    const reports = mergeLocalReports((await this.fetchCivicData()).reports);
-    const next = [report, ...reports];
-    saveLocalReports(next);
-    this.data = { ...(await this.fetchCivicData()), reports: next };
+
+    // Persist to localStorage first, then bust the in-memory cache so
+    // subsequent fetchReports calls pick up the new report.
+    const existing = readLocalReports();
+    saveLocalReports([report, ...existing]);
+    this.data = undefined;
+
     recordSubmission();
     return report;
   }
 
   async resolveReport(reportId: string, input: ResolveReportInput) {
-    const reports = (await this.fetchReports()).map((report) =>
-      report.id === reportId
-        ? {
-            ...report,
-            status: "resolved" as const,
-            resolved_at: new Date().toISOString(),
-            resolved_photo_url: input.photoUrl ?? null,
-            resolved_lat: input.lat,
-            resolved_lng: input.lng,
-            resolved_by_name: input.name || "Anonymous Citizen",
-            updated_at: new Date().toISOString()
-          }
-        : report
-    );
-    saveLocalReports(reports);
-    this.data = { ...(await this.fetchCivicData()), reports };
-    const report = reports.find((item) => item.id === reportId);
-    if (!report) throw new Error("Report not found");
-    return report;
+    const existing = readLocalReports();
+    let found: GarbageReport | undefined;
+    const updated = existing.map((report) => {
+      if (report.id !== reportId) return report;
+      found = {
+        ...report,
+        status: "resolved" as const,
+        resolved_at: new Date().toISOString(),
+        resolved_photo_url: input.photoUrl ?? null,
+        resolved_lat: input.lat,
+        resolved_lng: input.lng,
+        resolved_by_name: input.name || "Anonymous Citizen",
+        updated_at: new Date().toISOString()
+      };
+      return found;
+    });
+
+    if (!found) throw new Error("Report not found");
+    saveLocalReports(updated);
+    this.data = undefined;
+    return found;
   }
 
   async upvoteReport(reportId: string) {
     if (hasUpvoted(reportId)) return { alreadyVoted: true };
-    const reports = (await this.fetchReports()).map((report) =>
-      report.id === reportId ? { ...report, upvote_count: (report.upvote_count || 1) + 1 } : report
-    );
+
+    const existing = readLocalReports();
+    let newCount: number | undefined;
+    const updated = existing.map((report) => {
+      if (report.id !== reportId) return report;
+      newCount = (report.upvote_count || 1) + 1;
+      return { ...report, upvote_count: newCount };
+    });
+
     markUpvoted(reportId);
-    saveLocalReports(reports);
-    this.data = { ...(await this.fetchCivicData()), reports };
-    return { alreadyVoted: false, newCount: reports.find((report) => report.id === reportId)?.upvote_count };
+    saveLocalReports(updated);
+    this.data = undefined;
+    return { alreadyVoted: false, newCount };
   }
 
   async uploadReportPhoto(file: File) {
@@ -509,39 +519,57 @@ class LocalBackend implements Backend {
     const reports = await this.fetchReports();
     return {
       total: reports.length,
-      flagged: reports.filter((report) => report.moderation_status === "flagged").length,
-      rejected: reports.filter((report) => report.moderation_status === "rejected").length,
-      approved: reports.filter((report) => report.moderation_status === "approved").length
+      flagged: reports.filter((r) => r.moderation_status === "flagged").length,
+      rejected: reports.filter((r) => r.moderation_status === "rejected").length,
+      approved: reports.filter((r) => r.moderation_status === "approved").length
     };
   }
 
   async adminQueue(adminKey: string, status: ModerationStatus) {
     this.assertAdmin(adminKey);
-    return (await this.fetchReports()).filter((report) => report.moderation_status === status);
+    return (await this.fetchReports()).filter((r) => r.moderation_status === status);
   }
 
   async moderateReport(adminKey: string, reportId: string, decision: ModerationStatus) {
     this.assertAdmin(adminKey);
-    const reports = (await this.fetchReports()).map((report) =>
-      report.id === reportId
-        ? {
-            ...report,
-            moderation_status: decision,
-            moderation_metadata: { ...(report.moderation_metadata ?? {}), moderated_at: new Date().toISOString() }
-          }
-        : report
+    const existing = readLocalReports();
+    const updated = existing.map((r) =>
+      r.id === reportId
+        ? { ...r, moderation_status: decision, moderation_metadata: { ...(r.moderation_metadata ?? {}), moderated_at: new Date().toISOString() } }
+        : r
     );
-    saveLocalReports(reports);
-    this.data = { ...(await this.fetchCivicData()), reports };
+    saveLocalReports(updated);
+    this.data = undefined;
   }
 
   async bulkModerate(adminKey: string, reportIds: string[], decision: ModerationStatus) {
-    await Promise.all(reportIds.map((id) => this.moderateReport(adminKey, id, decision)));
+    // Single read-modify-write pass for efficiency.
+    this.assertAdmin(adminKey);
+    const idSet = new Set(reportIds);
+    const existing = readLocalReports();
+    const now = new Date().toISOString();
+    const updated = existing.map((r) =>
+      idSet.has(r.id)
+        ? { ...r, moderation_status: decision, moderation_metadata: { ...(r.moderation_metadata ?? {}), moderated_at: now } }
+        : r
+    );
+    saveLocalReports(updated);
+    this.data = undefined;
   }
 
   async swapDuplicate(adminKey: string, reportId: string, existingId: string) {
-    await this.moderateReport(adminKey, reportId, "approved");
-    await this.moderateReport(adminKey, existingId, "rejected");
+    // Approve incoming, reject original — single pass.
+    this.assertAdmin(adminKey);
+    const decisions = new Map<string, ModerationStatus>([[reportId, "approved"], [existingId, "rejected"]]);
+    const existing = readLocalReports();
+    const now = new Date().toISOString();
+    const updated = existing.map((r) => {
+      const decision = decisions.get(r.id);
+      if (!decision) return r;
+      return { ...r, moderation_status: decision, moderation_metadata: { ...(r.moderation_metadata ?? {}), moderated_at: now } };
+    });
+    saveLocalReports(updated);
+    this.data = undefined;
   }
 
   async rejectBoth(adminKey: string, reportId: string, existingId: string) {
@@ -552,6 +580,8 @@ class LocalBackend implements Backend {
     if (!adminKey || (adminKeyFallback && adminKey !== adminKeyFallback)) throw new Error("Invalid admin key");
   }
 }
+
+// ─── SupabaseBackend ──────────────────────────────────────────────────────────
 
 class SupabaseBackend extends LocalBackend {
   private client: SupabaseClient;
@@ -586,7 +616,11 @@ class SupabaseBackend extends LocalBackend {
   }
 
   override async fetchReports() {
-    let query = this.client.from("garbage_reports").select("*").neq("moderation_status", "rejected").order("created_at", { ascending: false });
+    let query = this.client
+      .from("garbage_reports")
+      .select("*")
+      .neq("moderation_status", "rejected")
+      .order("created_at", { ascending: false });
     if (!IS_STAGING) query = query.eq("is_test", false);
     const { data, error } = await query;
     if (error) throw error;
@@ -618,10 +652,7 @@ class SupabaseBackend extends LocalBackend {
     const { data, error: reportError } = await this.client
       .from("garbage_reports")
       .select("*")
-      .in(
-        "ward_number",
-        wards.map((ward) => ward.ward_number)
-      )
+      .in("ward_number", wards.map((w) => w.ward_number))
       .neq("moderation_status", "rejected")
       .order("created_at", { ascending: false });
     if (reportError) throw reportError;
@@ -644,7 +675,7 @@ class SupabaseBackend extends LocalBackend {
       .update({
         status: "resolved",
         resolved_at: new Date().toISOString(),
-        resolved_photo_url: input.photoUrl,
+        resolved_photo_url: input.photoUrl ?? null,
         resolved_lat: input.lat,
         resolved_lng: input.lng,
         resolved_by_name: input.name || "Anonymous Citizen"
@@ -665,12 +696,25 @@ class SupabaseBackend extends LocalBackend {
       .eq("voter_fingerprint", voter)
       .maybeSingle();
     if (existing) return { alreadyVoted: true };
-    const { error } = await this.client.from("report_upvotes").insert({ report_id: reportId, voter_fingerprint: voter });
+
+    const { error } = await this.client
+      .from("report_upvotes")
+      .insert({ report_id: reportId, voter_fingerprint: voter });
     if (error) throw error;
-    const report = await this.fetchReportById(reportId);
-    const newCount = (report?.upvote_count ?? 1) + 1;
-    const { error: updateError } = await this.client.from("garbage_reports").update({ upvote_count: newCount }).eq("id", reportId);
-    if (updateError) throw updateError;
+
+    // Read-then-increment: a concurrent upvote between these two statements
+    // can cause a lost update. The correct fix is a Postgres function:
+    //   create function increment_upvote(rid uuid) returns int ...
+    // and calling it via this.client.rpc('increment_upvote', { rid: reportId }).
+    // For now we accept the rare race; upvote_count is cosmetic, not financial.
+    const currentReport = await this.fetchReportById(reportId);
+    const newCount = (currentReport?.upvote_count ?? 1) + 1;
+    const { error: incError } = await this.client
+      .from("garbage_reports")
+      .update({ upvote_count: newCount })
+      .eq("id", reportId);
+    if (incError) throw incError;
+
     markUpvoted(reportId);
     return { alreadyVoted: false, newCount };
   }
@@ -720,7 +764,10 @@ class SupabaseBackend extends LocalBackend {
       headers: { "Content-Type": "application/json", "x-admin-key": adminKey },
       body: body ? JSON.stringify(body) : undefined
     });
-    if (!response.ok) throw new Error(await response.text());
+    if (!response.ok) {
+      const text = await response.text().catch(() => response.statusText);
+      throw new Error(text || `Admin API error ${response.status}`);
+    }
     return response.json() as Promise<T>;
   }
 }

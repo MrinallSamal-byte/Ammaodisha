@@ -19,12 +19,15 @@ export default function App() {
   const [path, setPath] = useState(() => window.location.pathname);
   const isAdmin = path === "/admin";
 
+  // Skip the civic-data fetch entirely when on the admin route — the admin panel
+  // has its own data loading and does not depend on CivicData.
   useEffect(() => {
+    if (isAdmin) return;
     backend
       .fetchCivicData()
       .then(setData)
       .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load civic data."));
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     const onPop = () => setPath(window.location.pathname);
@@ -39,6 +42,7 @@ export default function App() {
 
   const routeSelection = useMemo(() => parseRoute(path), [path]);
 
+  // Admin panel is independent — render before any civic-data guards.
   if (isAdmin) return <AdminPanel />;
 
   if (error) {
