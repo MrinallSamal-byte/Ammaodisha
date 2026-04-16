@@ -17,9 +17,11 @@ import {
   Phone,
   Plus,
   RefreshCw,
+  Search,
   Send,
   Share2,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   ThumbsUp,
   Trophy,
@@ -228,6 +230,8 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   const [showChangelog, setShowChangelog] = useState(false);
   const [showCivicNotice, setShowCivicNotice] = useState(() => readStorageValue("nk_civic_hidden") !== "1");
   const [viewMode, setViewMode] = useState<"map" | "list">("map");
+  const [showFilters, setShowFilters] = useState(false);
+  const [isOffline, setIsOffline] = useState(() => typeof navigator !== "undefined" && navigator.onLine === false);
   const [severityFilter, setSeverityFilter] = useState<"all" | SeverityKey>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "unresolved" | "resolved">("all");
   const [refreshing, setRefreshing] = useState(false);
@@ -238,6 +242,16 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   useEffect(() => {
     setReports(data.reports);
   }, [data.reports]);
+
+  useEffect(() => {
+    const syncOnlineState = () => setIsOffline(navigator.onLine === false);
+    window.addEventListener("online", syncOnlineState);
+    window.addEventListener("offline", syncOnlineState);
+    return () => {
+      window.removeEventListener("online", syncOnlineState);
+      window.removeEventListener("offline", syncOnlineState);
+    };
+  }, []);
 
   // Sync modal visibility with browser navigation (back/forward buttons).
   // When the URL returns to "/" (routeSelection === null) any open detail panel
@@ -385,6 +399,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
     if (wardFilterNumber != null) labels.push(`Ward ${wardFilterNumber}`);
     return labels;
   }, [searchQuery, severityFilter, statusFilter, wardFilterNumber]);
+  const activeFilterCount = activeFilterSummary.length;
 
   useEffect(() => {
     if (routeSelection?.type !== "ward") return;
@@ -433,24 +448,34 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
       )}
 
       <header className="topbar safe-top">
-        <button className="brand-chip" onClick={() => navigate("/")} aria-label="Go to Amma Odisha map">
-          <span className="brand-wordmark">
-            <strong>
-              Amma <b>Odisha</b>
-            </strong>
-            {/* Version badge — opens the changelog on click */}
-            <small
-              role="button"
-              tabIndex={0}
-              style={{ cursor: "pointer", textDecoration: "underline dotted" }}
-              title="View changelog"
-              onClick={(e) => { e.stopPropagation(); setShowChangelog(true); }}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); setShowChangelog(true); } }}
+        <div className="brand-chip">
+          <button className="brand-home" onClick={() => navigate("/")} aria-label="Go to Amma Odisha map">
+            <span className="brand-wordmark">
+              <strong>
+                Amma <b>Odisha</b>
+              </strong>
+            </span>
+          </button>
+          <button type="button" className="version-badge" title="View changelog" onClick={() => setShowChangelog(true)}>
+            v0.3.0
+          </button>
+        </div>
+        {showCivicNotice && (
+          <div className="topbar-nudge" aria-label="Amma Odisha civic reporting context">
+            <Home size={14} />
+            <span>New here? Tap reports and wards to see Bhubaneswar accountability.</span>
+            <button
+              type="button"
+              onClick={() => {
+                writeStorageValue("nk_civic_hidden", "1");
+                setShowCivicNotice(false);
+              }}
+              aria-label="Dismiss notice"
             >
-              v0.3.0
-            </small>
-          </span>
-        </button>
+              Got it
+            </button>
+          </div>
+        )}
         <div className="topbar-actions">
           <button
             className="icon-button"
@@ -467,92 +492,26 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
         </div>
       </header>
 
-      {showCivicNotice && (
-        <section className="civic-notice" aria-label="Amma Odisha civic reporting context">
-          <Home size={15} />
-          <span>
-            <strong>Amma Odisha</strong>{" "}
-            Report, verify, and track ward accountability across Bhubaneswar. →{" "}
-            <a href="https://ammaodisha.me" target="_blank" rel="noreferrer"><strong>ammaodisha.me</strong></a>
-          </span>
-          <button type="button" className="civic-dismiss" onClick={() => { writeStorageValue("nk_civic_hidden", "1"); setShowCivicNotice(false); }} aria-label="Dismiss notice">
-            Not now
-          </button>
-        </section>
-      )}
-
-      <section className="control-dock" aria-label="Filter reports">
-        <div className="control-grid">
-          <select value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value as "all" | SeverityKey)} aria-label="Filter by severity">
-            <option value="all">All Severity</option>
-            {Object.entries(SEVERITY).map(([key, value]) => (
-              <option value={key} key={key}>
-                {value.label}
-              </option>
-            ))}
-          </select>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | "unresolved" | "resolved")} aria-label="Filter by status">
-            <option value="all">All Status</option>
-            <option value="unresolved">Unresolved</option>
-            <option value="resolved">Cleaned</option>
-          </select>
-          <input
-            className="search-control"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search locality, ward, landmark"
-            aria-label="Search reports"
-          />
-          <select
-            className="sort-control"
-            value={sortBy}
-            onChange={(event) => setSortBy(event.target.value as "newest" | "upvotes" | "oldest")}
-            aria-label="Sort reports"
-          >
-            <option value="newest">Newest</option>
-            <option value="upvotes">Most Upvoted</option>
-            <option value="oldest">Oldest</option>
-          </select>
-        </div>
+      <section className="control-dock" aria-label="Map and report controls">
         <div className="map-mode-toggle">
           <SegmentedButton active={viewMode === "map"} onClick={() => setViewMode("map")} icon={<MapIcon size={14} />} label="Map" />
           <SegmentedButton active={viewMode === "list"} onClick={() => setViewMode("list")} icon={<List size={14} />} label="List" />
         </div>
-        <div className="quick-actions-row">
-          <button className={clsx("chip-button", wardFilterNumber != null && "is-active")} onClick={detectAndFilterMyWard} type="button">
-            {wardFilterState === "locating" ? <LoaderCircle className="spin" size={14} /> : <Layers size={14} />}
-            {wardFilterNumber != null ? `Ward ${wardFilterNumber}` : "Use My Ward"}
-          </button>
-          <button className="chip-button" onClick={clearFilters} type="button">
-            <X size={14} />
-            Clear
-          </button>
-          <button
-            className="chip-button refresh-chip"
-            onClick={() => void refreshReports()}
-            type="button"
-            disabled={refreshing}
-            aria-label="Refresh reports"
-          >
-            {refreshing ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
-            Refresh
-          </button>
-        </div>
-        {hasActiveFilters && (
-          <div className="active-filter-summary" aria-label="Active report filters">
-            <span>
-              <strong>{visibleReports.length}</strong> matching {visibleReports.length === 1 ? "report" : "reports"}
-            </span>
-            <div>
-              {activeFilterSummary.map((label) => (
-                <em key={label}>{label}</em>
-              ))}
-            </div>
-            <button type="button" onClick={clearFilters}>
-              Clear all
-            </button>
-          </div>
-        )}
+        <button
+          className={clsx("filter-button", activeFilterCount > 0 && "is-active")}
+          onClick={() => setShowFilters(true)}
+          type="button"
+          aria-label="Open search and filters"
+        >
+          <SlidersHorizontal size={14} />
+          Filter
+          {activeFilterCount > 0 && <span>{activeFilterCount}</span>}
+        </button>
+        <button className={clsx("chip-button", wardFilterNumber != null && "is-active")} onClick={detectAndFilterMyWard} type="button">
+          {wardFilterState === "locating" ? <LoaderCircle className="spin" size={14} /> : <Layers size={14} />}
+          {wardFilterNumber != null ? `Ward ${wardFilterNumber}` : "Use My Ward"}
+        </button>
+        {isOffline && <p className="control-error offline-status">You are offline. You can browse cached reports, but submitting may fail.</p>}
         {wardFilterState === "error" && <p className="control-error">Could not detect your location inside Bhubaneswar. You can still filter manually.</p>}
         {refreshError && (
           <div className="control-error control-error-action" role="status">
@@ -564,8 +523,48 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
         )}
       </section>
 
+      {showFilters && (
+        <FilterSheet
+          activeFilterCount={activeFilterCount}
+          activeFilterSummary={activeFilterSummary}
+          clearFilters={clearFilters}
+          onClose={() => setShowFilters(false)}
+          onRefresh={refreshReports}
+          refreshing={refreshing}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          setSeverityFilter={setSeverityFilter}
+          setSortBy={setSortBy}
+          setStatusFilter={setStatusFilter}
+          severityFilter={severityFilter}
+          sortBy={sortBy}
+          statusFilter={statusFilter}
+          visibleCount={visibleReports.length}
+        />
+      )}
+
       {viewMode === "list" && (
         <div className="list-overlay">
+          <div className="list-tools" aria-label="Search and sort list reports">
+            <label>
+              <Search size={14} />
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search ward, address, landmark"
+                aria-label="Search reports"
+              />
+            </label>
+            <select
+              value={sortBy}
+              onChange={(event) => setSortBy(event.target.value as "newest" | "upvotes" | "oldest")}
+              aria-label="Sort reports"
+            >
+              <option value="newest">Sort: Newest</option>
+              <option value="upvotes">Sort: Most Upvoted</option>
+              <option value="oldest">Sort: Oldest</option>
+            </select>
+          </div>
           <ReportList
             reports={visibleReports}
             totalReports={reports.length}
@@ -672,6 +671,124 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: stri
   );
 }
 
+function FilterSheet({
+  activeFilterCount,
+  activeFilterSummary,
+  clearFilters,
+  onClose,
+  onRefresh,
+  refreshing,
+  searchQuery,
+  setSearchQuery,
+  setSeverityFilter,
+  setSortBy,
+  setStatusFilter,
+  severityFilter,
+  sortBy,
+  statusFilter,
+  visibleCount
+}: {
+  activeFilterCount: number;
+  activeFilterSummary: string[];
+  clearFilters: () => void;
+  onClose: () => void;
+  onRefresh: () => void | Promise<void>;
+  refreshing: boolean;
+  searchQuery: string;
+  setSearchQuery: (value: string) => void;
+  setSeverityFilter: (value: "all" | SeverityKey) => void;
+  setSortBy: (value: "newest" | "upvotes" | "oldest") => void;
+  setStatusFilter: (value: "all" | "unresolved" | "resolved") => void;
+  severityFilter: "all" | SeverityKey;
+  sortBy: "newest" | "upvotes" | "oldest";
+  statusFilter: "all" | "unresolved" | "resolved";
+  visibleCount: number;
+}) {
+  return (
+    <DialogSurface ariaLabel="Search and filter reports" className="filter-sheet" onClose={onClose}>
+      <button className="close-button" onClick={onClose} aria-label="Close filters">
+        <X size={18} />
+      </button>
+      <div className="sheet-title-row">
+        <div>
+          <p className="eyebrow">Search & Filter</p>
+          <h2>Find reports faster</h2>
+        </div>
+        <SlidersHorizontal size={20} />
+      </div>
+      <label className="filter-field">
+        <span>Search</span>
+        <div className="filter-search">
+          <Search size={15} />
+          <input
+            autoFocus
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Address, ward, or landmark"
+            aria-label="Search reports"
+          />
+        </div>
+      </label>
+      <div className="filter-grid">
+        <label className="filter-field">
+          <span>Severity</span>
+          <select value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value as "all" | SeverityKey)} aria-label="Filter by severity">
+            <option value="all">All Severity</option>
+            {Object.entries(SEVERITY).map(([key, value]) => (
+              <option value={key} key={key}>
+                {value.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="filter-field">
+          <span>Status</span>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | "unresolved" | "resolved")} aria-label="Filter by status">
+            <option value="all">All Status</option>
+            <option value="unresolved">Unresolved</option>
+            <option value="resolved">Cleaned</option>
+          </select>
+        </label>
+        <label className="filter-field">
+          <span>Sort</span>
+          <select value={sortBy} onChange={(event) => setSortBy(event.target.value as "newest" | "upvotes" | "oldest")} aria-label="Sort reports">
+            <option value="newest">Newest</option>
+            <option value="upvotes">Most Upvoted</option>
+            <option value="oldest">Oldest</option>
+          </select>
+        </label>
+      </div>
+      <div className="filter-summary" aria-label="Active report filters">
+        <span>
+          <strong>{visibleCount}</strong> matching {visibleCount === 1 ? "report" : "reports"}
+        </span>
+        {activeFilterCount > 0 ? (
+          <div>
+            {activeFilterSummary.map((label) => (
+              <em key={label}>{label}</em>
+            ))}
+          </div>
+        ) : (
+          <p>No filters active.</p>
+        )}
+      </div>
+      <div className="filter-actions">
+        <button type="button" className="secondary-cta" onClick={clearFilters} disabled={activeFilterCount === 0 && sortBy === "newest"}>
+          <X size={14} />
+          Clear
+        </button>
+        <button type="button" className="secondary-cta" onClick={() => void onRefresh()} disabled={refreshing}>
+          {refreshing ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
+          Refresh
+        </button>
+        <button type="button" className="primary-cta" onClick={onClose}>
+          Apply
+        </button>
+      </div>
+    </DialogSurface>
+  );
+}
+
 function InsightsSheet({
   reports,
   visibleReports,
@@ -698,7 +815,6 @@ function InsightsSheet({
         <button className="close-button" onClick={onClose} aria-label="Close insights">
           <X size={18} />
         </button>
-        <div className="sheet-handle" aria-hidden="true" />
         <div className="sheet-title-row">
           <div>
             <p className="eyebrow">Public Accountability</p>
@@ -911,6 +1027,7 @@ function ReportDetail({
   const [isUpvoting, setIsUpvoting] = useState(false);
   const [upvoted, setUpvoted] = useState(() => hasUpvoted(report.id));
   const [showResolve, setShowResolve] = useState(false);
+  const [showContactActions, setShowContactActions] = useState(false);
   const [externalPreview, setExternalPreview] = useState<ExternalPreviewConfig | null>(null);
 
   useEffect(() => {
@@ -1037,35 +1154,53 @@ function ReportDetail({
             <RepCard label="MP" rep={mp} area={ward?.parliamentary_constituency} onClick={() => mp && openProfile({ type: "mp", id: mp.constituency })} />
           </div>
 
-          <div className="action-grid">
-            <button onClick={() => void upvote()} disabled={upvoted || isUpvoting}>
-              {isUpvoting ? <LoaderCircle className="spin" size={16} /> : <ThumbsUp size={16} />}
-              {upvoted ? "Upvoted" : "Upvote"}
+          <div className="detail-actions">
+            <div className="primary-action-row">
+              <button className="primary-detail-action" onClick={() => void upvote()} disabled={upvoted || isUpvoting}>
+                {isUpvoting ? <LoaderCircle className="spin" size={16} /> : <ThumbsUp size={16} />}
+                {upvoted ? "Upvoted" : "Upvote"}
+              </button>
+              <button className="primary-detail-action" onClick={() => void shareReport()}>
+                <Share2 size={16} />
+                Share
+              </button>
+            </div>
+            <button className="directions-link" onClick={prepareDirections}>
+              <ArrowUpRight size={15} />
+              Get directions
             </button>
-            <button onClick={() => void shareReport()}>
-              <Share2 size={16} />
-              Share
-            </button>
-            <button onClick={prepareDirections}>
-              <ArrowUpRight size={16} />
-              Directions
-            </button>
-            <button onClick={prepareComplaint}>
-              <MessageCircle size={16} />
-              WhatsApp BMC
-            </button>
-            <button onClick={() => prepareCall("BMC", BMC_NUMBER)}>
-              <Phone size={16} />
-              Call BMC
-            </button>
-            <button onClick={() => prepareCall("Helpline 1929", BMC_HELPLINE)}>
-              <Phone size={16} />
-              Helpline 1929
-            </button>
+            <div className="contact-panel">
+              <button
+                className="contact-toggle"
+                type="button"
+                onClick={() => setShowContactActions((current) => !current)}
+                aria-expanded={showContactActions}
+              >
+                <MessageCircle size={15} />
+                Contact BMC
+                <ChevronDown size={15} />
+              </button>
+              {showContactActions && (
+                <div className="contact-actions">
+                  <button onClick={prepareComplaint}>
+                    <MessageCircle size={16} />
+                    WhatsApp BMC
+                  </button>
+                  <button onClick={() => prepareCall("BMC", BMC_NUMBER)}>
+                    <Phone size={16} />
+                    Call BMC
+                  </button>
+                  <button onClick={() => prepareCall("Helpline 1929", BMC_HELPLINE)}>
+                    <Phone size={16} />
+                    Helpline 1929
+                  </button>
+                </div>
+              )}
+            </div>
             {report.status !== "resolved" && (
               <button onClick={() => setShowResolve(true)} className="green-action">
                 <CheckCircle2 size={16} />
-                It is Cleaned Up - Verify
+                Mark as Cleaned
               </button>
             )}
           </div>
@@ -1366,7 +1501,10 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
     if (!address.trim()) nextFieldErrors.address = "Add a nearby landmark or address so others can find the spot.";
     setFieldErrors(nextFieldErrors);
     if (Object.keys(nextFieldErrors).length) {
-      setFormError("Please fix the highlighted fields before submitting.");
+      window.requestAnimationFrame(() => {
+        const firstInvalid = document.querySelector<HTMLElement>(".form-sheet [aria-invalid='true']");
+        (firstInvalid?.closest(".field") ?? firstInvalid)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
       return;
     }
     if (!photo || !selectedWard) return;
@@ -1414,7 +1552,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
           <div>
             <p className="eyebrow">Garbage Report</p>
             <h2>Report Garbage</h2>
-            <p>Take a photo, confirm the ward, and add a landmark citizens can recognize.</p>
+            <p>Confirm the ward, add a landmark, then attach a clear photo.</p>
           </div>
           <button className="close-button" onClick={onClose} aria-label="Close report form">
             <X size={18} />
@@ -1429,25 +1567,6 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
             </span>
           </div>
         )}
-        <div className="field">
-          <span>
-            Photo <b>*</b>
-          </span>
-          <label className={clsx("photo-drop", photoPreview && "has-photo")}>
-            {photoPreview ? <img src={photoPreview} alt="" /> : <Camera size={30} />}
-            <em>{photoPreview ? "Tap to Retake" : "Take a Photo"}</em>
-            <small>A photo makes your report 10x more credible</small>
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              aria-invalid={Boolean(fieldErrors.photo)}
-              aria-describedby={fieldErrors.photo ? "report-photo-error" : undefined}
-              onChange={(event) => onFile(event.target.files?.[0])}
-            />
-          </label>
-          {fieldErrors.photo && <p className="field-error" id="report-photo-error">{fieldErrors.photo}</p>}
-        </div>
         <label className="field">
           <span>
             Ward <b>*</b>
@@ -1483,9 +1602,10 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
                   ? "Detecting..."
                   : locationState === "locating"
                     ? "Finding..."
-                    : "Use current location"}
+                : "Use current location"}
             </button>
           </div>
+          <p className="privacy-note">Your GPS coordinates are used only to identify the ward and are not shared publicly.</p>
           {fieldErrors.ward && <p className="field-error" id="report-ward-error">{fieldErrors.ward}</p>}
         </label>
         <label className="field">
@@ -1505,6 +1625,25 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
           <small>Please add a landmark or address so others can find this spot.</small>
           {fieldErrors.address && <p className="field-error" id="report-address-error">{fieldErrors.address}</p>}
         </label>
+        <div className="field">
+          <span>
+            Photo <b>*</b>
+          </span>
+          <label className={clsx("photo-drop", photoPreview && "has-photo")}>
+            {photoPreview ? <img src={photoPreview} alt="" /> : <Camera size={30} />}
+            <em>{photoPreview ? "Tap to Retake" : "Take a Photo"}</em>
+            <small>Attach the photo after the location is clear.</small>
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              aria-invalid={Boolean(fieldErrors.photo)}
+              aria-describedby={fieldErrors.photo ? "report-photo-error" : undefined}
+              onChange={(event) => onFile(event.target.files?.[0])}
+            />
+          </label>
+          {fieldErrors.photo && <p className="field-error" id="report-photo-error">{fieldErrors.photo}</p>}
+        </div>
         <label className="field">
           <span>How Bad Is It?</span>
           <div className="option-grid">

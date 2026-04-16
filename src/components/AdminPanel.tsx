@@ -4,6 +4,8 @@ import {
   CheckCircle2,
   CircleCheck,
   CircleX,
+  Eye,
+  EyeOff,
   ExternalLink,
   LoaderCircle,
   LogOut,
@@ -62,6 +64,7 @@ const reasonLabels: Record<string, string> = {
 
 export function AdminPanel() {
   const [adminKey, setAdminKey] = useState(() => readSessionValue(SESSION_KEY));
+  const [showAdminKey, setShowAdminKey] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [stats, setStats] = useState<AdminStats | null>(null);
@@ -176,13 +179,23 @@ export function AdminPanel() {
           <p>Review flagged citizen reports before they appear on the public map.</p>
           <label className="admin-login-field">
             <span>Admin key</span>
-            <input
-              type="password"
-              value={adminKey}
-              onChange={(event) => setAdminKey(event.target.value)}
-              onKeyDown={(event) => event.key === "Enter" && adminKey && void login()}
-              placeholder="Admin key"
-            />
+            <div className="credential-row">
+              <input
+                type={showAdminKey ? "text" : "password"}
+                value={adminKey}
+                onChange={(event) => setAdminKey(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && adminKey && void login()}
+                placeholder="Admin key"
+              />
+              <button
+                type="button"
+                className="password-toggle"
+                onClick={() => setShowAdminKey((current) => !current)}
+                aria-label={showAdminKey ? "Hide admin key" : "Show admin key"}
+              >
+                {showAdminKey ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </label>
           {loginError && <p className="warning-text">{loginError}</p>}
           <button onClick={() => void login()} disabled={loading || !adminKey}>
@@ -329,10 +342,12 @@ function ModerationCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [photoRevealed, setPhotoRevealed] = useState(false);
   const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
   const metadata = report.moderation_metadata ?? {};
   const reason = metadata.flag_reason || metadata.rejection_reason || "";
   const duplicate = reason === "potential_duplicate" && report._duplicate_original;
+  const isNsfwPhoto = reason === "safesearch_failed";
 
   const run = async (decision: ModerationStatus) => {
     setBusy(true);
@@ -348,8 +363,19 @@ function ModerationCard({
     <article className="moderation-card" style={{ animationDelay: `${index * 40}ms` }}>
       <div className="moderation-main">
         {report.photo_url ? (
-          <button onClick={() => onViewPhoto(report.photo_url!)} aria-label="View full photo">
+          <button
+            className={clsx("moderation-photo", isNsfwPhoto && !photoRevealed && "is-covered")}
+            onClick={() => {
+              if (isNsfwPhoto && !photoRevealed) {
+                setPhotoRevealed(true);
+                return;
+              }
+              onViewPhoto(report.photo_url!);
+            }}
+            aria-label={isNsfwPhoto && !photoRevealed ? "Reveal NSFW photo to review" : "View full photo"}
+          >
             <img src={report.photo_url} alt="" />
+            {isNsfwPhoto && !photoRevealed && <span>Reveal</span>}
           </button>
         ) : (
           <span>No photo</span>

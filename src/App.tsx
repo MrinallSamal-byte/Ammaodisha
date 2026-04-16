@@ -82,7 +82,8 @@ export default function App() {
     return (
       <main className="loading-state">
         <img src="/Favicon.svg" alt="" />
-        <p>Loading...</p>
+        <p>Fetching Bhubaneswar ward data...</p>
+        <span className="loading-progress" aria-hidden="true" />
       </main>
     );
   }

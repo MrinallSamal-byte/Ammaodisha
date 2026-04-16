@@ -29,6 +29,23 @@ const REPORT_SOURCE_ID = "report-points";
 const CLUSTER_LAYER_ID = "report-clusters";
 const CLUSTER_COUNT_LAYER_ID = "report-cluster-count";
 const REPORT_LAYER_ID = "report-points-unclustered";
+const CLUSTER_HINT_KEY = "nk_cluster_hint_seen";
+
+function shouldShowClusterHint() {
+  try {
+    return localStorage.getItem("nk_intro_seen") !== "1" && localStorage.getItem(CLUSTER_HINT_KEY) !== "1";
+  } catch {
+    return true;
+  }
+}
+
+function markClusterHintSeen() {
+  try {
+    localStorage.setItem(CLUSTER_HINT_KEY, "1");
+  } catch {
+    // Ignore storage write failures.
+  }
+}
 
 function createReportPointData(reports: GarbageReport[], wardBoundaries: WardFeatureCollection): ReportPointCollection {
   return {
@@ -62,6 +79,7 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard,
   const reportsByIdRef = useRef(new Map<string, GarbageReport>());
   const reportPointDataRef = useRef<ReportPointCollection>({ type: "FeatureCollection", features: [] });
   const [mapReady, setMapReady] = useState(false);
+  const [showClusterHint, setShowClusterHint] = useState(shouldShowClusterHint);
   const reportPointData = useMemo(() => createReportPointData(reports, wardBoundaries), [reports, wardBoundaries]);
 
   useEffect(() => {
@@ -76,6 +94,15 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard,
   useEffect(() => {
     reportsByIdRef.current = new Map(reports.map((report) => [report.id, report]));
   }, [reports]);
+
+  useEffect(() => {
+    if (!showClusterHint) return;
+    const timer = window.setTimeout(() => {
+      setShowClusterHint(false);
+      markClusterHintSeen();
+    }, 6000);
+    return () => window.clearTimeout(timer);
+  }, [showClusterHint]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -280,9 +307,11 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard,
   return (
     <div className="map-shell" aria-label="Amma Odisha Bhubaneswar garbage map">
       <div className="map-canvas" ref={containerRef} />
-      <div className="map-cluster-hint" aria-label="Map cluster guidance">
-        Numbered circles group nearby reports. Zoom in for individual spots.
-      </div>
+      {showClusterHint && (
+        <div className="map-cluster-hint" aria-label="Map cluster guidance">
+          Grouped reports. Zoom in to see exact spots.
+        </div>
+      )}
     </div>
   );
 }

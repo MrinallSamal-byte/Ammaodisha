@@ -7,9 +7,9 @@ test("public map shell loads", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("button", { name: /About Amma Odisha/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /Report Garbage/i })).toBeVisible();
-  await expect(page.getByLabel("Amma Odisha civic reporting context")).toContainText("ward accountability across Bhubaneswar");
+  await expect(page.getByLabel("Amma Odisha civic reporting context")).toContainText("Bhubaneswar accountability");
   await expect(page.getByRole("button", { name: /Open Amma Odisha insights/i })).toBeVisible();
-  await expect(page.getByLabel("Map cluster guidance")).toContainText("Numbered circles group nearby reports");
+  await expect(page.getByLabel("Map cluster guidance")).toContainText("Grouped reports");
 });
 
 test("list mode exposes the issue feed", async ({ page }) => {
@@ -31,8 +31,11 @@ test("report form opens as a mobile-first sheet", async ({ page }) => {
 test("mobile report controls expose search and sort", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
-  await expect(page.getByLabel("Search reports")).toBeVisible();
-  await expect(page.getByLabel("Sort reports")).toBeVisible();
+  await page.getByRole("button", { name: /Start using map/i }).click().catch(() => undefined);
+  await page.getByRole("button", { name: /Open search and filters/i }).click();
+  const filterDialog = page.getByRole("dialog", { name: /Search and filter reports/i });
+  await expect(filterDialog.getByLabel("Search reports")).toBeVisible();
+  await expect(filterDialog.getByLabel("Sort reports")).toBeVisible();
 });
 
 test("report form requests location only after user action", async ({ page }) => {
@@ -71,8 +74,11 @@ test("report form requests location only after user action", async ({ page }) =>
 test("filtered list empty state can clear filters", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /Start using map/i }).click().catch(() => undefined);
-  await page.getByLabel("Search reports").fill("zzzz-no-report-here");
-  await expect(page.getByLabel("Active report filters")).toContainText("Search: zzzz-no-report-here");
+  await page.getByRole("button", { name: /Open search and filters/i }).click();
+  const filterDialog = page.getByRole("dialog", { name: /Search and filter reports/i });
+  await filterDialog.getByLabel("Search reports").fill("zzzz-no-report-here");
+  await expect(filterDialog.getByLabel("Active report filters")).toContainText("Search: zzzz-no-report-here");
+  await page.getByRole("button", { name: /^Apply$/i }).click();
   await page.getByRole("button", { name: /^List$/i }).click();
   await expect(page.getByText(/No reports match your current filters/i)).toBeVisible();
   await page.getByRole("button", { name: /Clear filters/i }).click();
@@ -106,9 +112,10 @@ test("deep links open contextual public sheets", async ({ page }) => {
 
   await page.goto(`/report/${reports[0].id}`);
   await expect(page.getByRole("button", { name: /Close report detail/i })).toBeVisible();
-  await page.getByRole("button", { name: /Directions/i }).click();
+  await page.getByRole("button", { name: /Get directions/i }).click();
   await expect(page.getByRole("dialog", { name: /Open directions/i })).toContainText("Google Maps");
   await page.getByRole("button", { name: /Not now/i }).click();
+  await page.getByRole("button", { name: /Contact BMC/i }).click();
   await page.getByRole("button", { name: /Call BMC/i }).click();
   await expect(page.getByRole("dialog", { name: /^Call BMC$/i })).toContainText("start a phone call");
 });
