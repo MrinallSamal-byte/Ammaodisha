@@ -85,7 +85,7 @@ export function AdminPanel() {
       setIsLoggedIn(true);
       await loadQueue(activeTab, key);
     } catch {
-      setLoginError("Invalid admin key");
+      setLoginError("That admin key did not work. Check the key and try again.");
     } finally {
       setLoading(false);
     }
@@ -170,15 +170,20 @@ export function AdminPanel() {
     return (
       <main className="admin-login">
         <section>
-          <img src="/logo.png" alt="Moderator" />
-          <p>Enter admin key to access the moderation queue.</p>
-          <input
-            type="password"
-            value={adminKey}
-            onChange={(event) => setAdminKey(event.target.value)}
-            onKeyDown={(event) => event.key === "Enter" && adminKey && void login()}
-            placeholder="Admin key"
-          />
+          <img src="/logo.png" alt="Amma Odisha" />
+          <p className="eyebrow">Moderator workspace</p>
+          <h1>Amma Odisha Moderation</h1>
+          <p>Review flagged citizen reports before they appear on the public map.</p>
+          <label className="admin-login-field">
+            <span>Admin key</span>
+            <input
+              type="password"
+              value={adminKey}
+              onChange={(event) => setAdminKey(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && adminKey && void login()}
+              placeholder="Admin key"
+            />
+          </label>
           {loginError && <p className="warning-text">{loginError}</p>}
           <button onClick={() => void login()} disabled={loading || !adminKey}>
             {loading ? <LoaderCircle className="spin" size={16} /> : <ShieldAlert size={16} />}

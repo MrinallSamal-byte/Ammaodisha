@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleAlert,
+  ExternalLink,
   Home,
   Info,
   Layers,
@@ -42,6 +43,8 @@ import type {
 } from "../types/domain";
 
 const MapView = lazy(async () => ({ default: (await import("./MapView")).MapView }));
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 type RouteSelection =
   | { type: "report"; id: string }
@@ -49,6 +52,13 @@ type RouteSelection =
   | { type: "mla"; id: string }
   | { type: "mp"; id: string }
   | null;
+
+interface ExternalPreviewConfig {
+  confirmLabel: string;
+  details: string;
+  helper: string;
+  title: string;
+}
 
 interface PublicAppProps {
   data: CivicData;
@@ -99,6 +109,108 @@ function writeStorageValue(key: string, value: string) {
   }
 }
 
+function getFocusableElements(container: HTMLElement) {
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((element) => {
+    const style = window.getComputedStyle(element);
+    return style.display !== "none" && style.visibility !== "hidden";
+  });
+}
+
+function DialogSurface({
+  ariaLabel,
+  ariaLabelledBy,
+  children,
+  className,
+  disableEscape = false,
+  disableFocusTrap = false,
+  layerClassName = "modal-layer",
+  onClose
+}: {
+  ariaLabel?: string;
+  ariaLabelledBy?: string;
+  children: ReactNode;
+  className: string;
+  disableEscape?: boolean;
+  disableFocusTrap?: boolean;
+  layerClassName?: string;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => {
+      const firstFocusable = getFocusableElements(dialog)[0];
+      (firstFocusable ?? dialog).focus({ preventScroll: true });
+    });
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !disableEscape) {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (event.key !== "Tab" || disableFocusTrap) return;
+
+      const focusable = getFocusableElements(dialog);
+      if (!focusable.length) {
+        event.preventDefault();
+        dialog.focus({ preventScroll: true });
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      } else if (active instanceof HTMLElement && !dialog.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", onKeyDown);
+      previousFocusRef.current?.focus({ preventScroll: true });
+    };
+  }, [disableEscape, disableFocusTrap, onClose]);
+
+  return (
+    <div
+      className={layerClassName}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <article
+        ref={dialogRef}
+        className={className}
+        role="dialog"
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabelledBy}
+        aria-modal="true"
+        tabIndex={-1}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        {children}
+      </article>
+    </div>
+  );
+}
+
 export function PublicApp({ data, routeSelection, onDataChange, navigate }: PublicAppProps) {
   const [reports, setReports] = useState(data.reports);
   const [selectedReport, setSelectedReport] = useState<GarbageReport | null>(null);
@@ -119,6 +231,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   const [severityFilter, setSeverityFilter] = useState<"all" | SeverityKey>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "unresolved" | "resolved">("all");
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
 
   const wardsByNumber = useMemo(() => new globalThis.Map(data.wards.map((ward) => [ward.ward_number, ward])), [data.wards]);
 
@@ -179,17 +292,21 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   const resolved = reports.filter((report) => report.status === "resolved");
   const worstWards = useMemo(() => getWorstWards(filteredReports, data.wards), [filteredReports, data.wards]);
   const filteredWard = wardFilterNumber != null ? wardsByNumber.get(wardFilterNumber) : null;
+  const hasActiveFilters =
+    Boolean(searchQuery.trim()) || severityFilter !== "all" || statusFilter !== "all" || wardFilterNumber != null;
 
   // Refresh: surface errors as a brief visual indicator rather than silently failing.
   const refreshReports = async () => {
     if (refreshing) return;
     setRefreshing(true);
+    setRefreshError("");
     try {
       const nextReports = await backend.fetchReports();
       setReports(nextReports);
       onDataChange({ ...data, reports: nextReports });
     } catch (err) {
       console.error("Refresh failed", err);
+      setRefreshError("Could not refresh reports. Check your connection and try again.");
       // Data remains unchanged; we do not wipe existing reports on fetch failure.
     } finally {
       setRefreshing(false);
@@ -258,6 +375,16 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
     setSortBy("newest");
     setWardFilterState("idle");
   }, []);
+
+  const activeFilterSummary = useMemo(() => {
+    const labels: string[] = [];
+    const query = searchQuery.trim();
+    if (query) labels.push(`Search: ${query}`);
+    if (severityFilter !== "all") labels.push(`Severity: ${SEVERITY[severityFilter].label}`);
+    if (statusFilter !== "all") labels.push(`Status: ${statusFilter === "resolved" ? "Cleaned" : "Unresolved"}`);
+    if (wardFilterNumber != null) labels.push(`Ward ${wardFilterNumber}`);
+    return labels;
+  }, [searchQuery, severityFilter, statusFilter, wardFilterNumber]);
 
   useEffect(() => {
     if (routeSelection?.type !== "ward") return;
@@ -333,8 +460,9 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
           >
             <Info size={17} />
           </button>
-          <a className="icon-button" href="https://x.com/MrinallSamal" target="_blank" rel="noreferrer" aria-label="Follow on X">
-            <X size={17} />
+          <a className="social-link" href="https://x.com/MrinallSamal" target="_blank" rel="noreferrer" aria-label="Follow Amma Odisha updates">
+            <span>Follow</span>
+            <ExternalLink size={14} />
           </a>
         </div>
       </header>
@@ -348,7 +476,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
             <a href="https://ammaodisha.me" target="_blank" rel="noreferrer"><strong>ammaodisha.me</strong></a>
           </span>
           <button type="button" className="civic-dismiss" onClick={() => { writeStorageValue("nk_civic_hidden", "1"); setShowCivicNotice(false); }} aria-label="Dismiss notice">
-            <X size={14} />
+            Not now
           </button>
         </section>
       )}
@@ -410,12 +538,43 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
             Refresh
           </button>
         </div>
+        {hasActiveFilters && (
+          <div className="active-filter-summary" aria-label="Active report filters">
+            <span>
+              <strong>{visibleReports.length}</strong> matching {visibleReports.length === 1 ? "report" : "reports"}
+            </span>
+            <div>
+              {activeFilterSummary.map((label) => (
+                <em key={label}>{label}</em>
+              ))}
+            </div>
+            <button type="button" onClick={clearFilters}>
+              Clear all
+            </button>
+          </div>
+        )}
         {wardFilterState === "error" && <p className="control-error">Could not detect your location inside Bhubaneswar. You can still filter manually.</p>}
+        {refreshError && (
+          <div className="control-error control-error-action" role="status">
+            <span>{refreshError}</span>
+            <button type="button" onClick={() => void refreshReports()}>
+              Retry
+            </button>
+          </div>
+        )}
       </section>
 
       {viewMode === "list" && (
         <div className="list-overlay">
-          <ReportList reports={visibleReports} wards={data.wards} representatives={data.representatives} onSelect={handleMapReportSelect} />
+          <ReportList
+            reports={visibleReports}
+            totalReports={reports.length}
+            wards={data.wards}
+            representatives={data.representatives}
+            hasActiveFilters={hasActiveFilters}
+            onClearFilters={clearFilters}
+            onSelect={handleMapReportSelect}
+          />
         </div>
       )}
 
@@ -433,6 +592,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
           <BarChart3 size={18} />
           <span>
             <strong>{visibleReports.length}</strong>
+            <small>Visible reports</small>
           </span>
         </button>
       </footer>
@@ -534,8 +694,7 @@ function InsightsSheet({
   const activeShare = Math.round((unresolvedCount / Math.max(1, reports.length)) * 100);
 
   return (
-    <div className="modal-layer" onMouseDown={onClose}>
-      <article className="insights-sheet" onMouseDown={(event) => event.stopPropagation()}>
+    <DialogSurface ariaLabel="Amma Odisha insights" className="insights-sheet" onClose={onClose}>
         <button className="close-button" onClick={onClose} aria-label="Close insights">
           <X size={18} />
         </button>
@@ -585,43 +744,53 @@ function InsightsSheet({
             <p className="empty">No active ward hotspots right now.</p>
           )}
         </div>
-      </article>
-    </div>
+    </DialogSurface>
   );
 }
 
 function IntroOverlay({ onClose }: { onClose: () => void }) {
   return (
-    <aside className="intro-nudge" role="dialog" aria-label="Amma Odisha intro">
+    <DialogSurface layerClassName="intro-nudge" className="intro-card" ariaLabel="Amma Odisha intro" onClose={onClose}>
       <button className="toast-close" onClick={onClose} aria-label="Dismiss intro">
         <X size={12} />
       </button>
-      <div className="intro-card">
-        <img src="/logo.png" alt="" />
-        <p className="eyebrow">Bhubaneswar (BMC)</p>
-        <h2>Garbage reports, mapped in public.</h2>
-        <p>Report it. Photograph it. Track who is responsible.</p>
-        <small>Every dump is linked to a ward, MLA, and MP so cleanup pressure stays visible.</small>
-        <b>67 wards · 4 MLAs · 1 MP · All of Bhubaneswar</b>
-        <button className="secondary-cta" onClick={onClose}>
-          Start using map
-        </button>
-      </div>
-    </aside>
+      <img src="/logo.png" alt="" />
+      <p className="eyebrow">Bhubaneswar (BMC)</p>
+      <h2>Garbage reports, mapped in public.</h2>
+      <p>Report it. Photograph it. Track who is responsible.</p>
+      <small>Every dump is linked to a ward, MLA, and MP so cleanup pressure stays visible.</small>
+      <b>67 wards · 4 MLAs · 1 MP · All of Bhubaneswar</b>
+      <button className="secondary-cta" onClick={onClose}>
+        Start using map
+      </button>
+    </DialogSurface>
   );
 }
 
 function ReportList({
+  emptyDescription,
+  emptyTitle,
+  hasActiveFilters = false,
+  initialLimit = 60,
+  onClearFilters,
   reports,
+  totalReports = reports.length,
   wards,
   representatives,
   onSelect
 }: {
+  emptyDescription?: string;
+  emptyTitle?: string;
+  hasActiveFilters?: boolean;
+  initialLimit?: number;
+  onClearFilters?: () => void;
   reports: GarbageReport[];
+  totalReports?: number;
   wards: Ward[];
   representatives?: Representative[];
   onSelect: (report: GarbageReport) => void;
 }) {
+  const [visibleCount, setVisibleCount] = useState(initialLimit);
   const wardsByNumber = useMemo(() => new Map(wards.map((ward) => [ward.ward_number, ward])), [wards]);
   const mlaByConstituency = useMemo(() => {
     const map = new Map<string, Representative>();
@@ -630,6 +799,12 @@ function ReportList({
     });
     return map;
   }, [representatives]);
+  const visibleItems = reports.slice(0, visibleCount);
+  const hasMore = reports.length > visibleCount;
+
+  useEffect(() => {
+    setVisibleCount(initialLimit);
+  }, [initialLimit, reports]);
 
   return (
     <div className="report-list">
@@ -641,13 +816,34 @@ function ReportList({
         <span className="pill red">Public</span>
       </div>
       {reports.length ? (
-        reports.map((report) => {
-          const ward = wardsByNumber.get(report.ward_number);
-          const mla = ward ? mlaByConstituency.get(ward.assembly_constituency) : undefined;
-          return <ReportListItem key={report.id} report={report} ward={ward} mla={mla} onSelect={onSelect} />;
-        })
+        <>
+          {visibleItems.map((report) => {
+            const ward = wardsByNumber.get(report.ward_number);
+            const mla = ward ? mlaByConstituency.get(ward.assembly_constituency) : undefined;
+            return <ReportListItem key={report.id} report={report} ward={ward} mla={mla} onSelect={onSelect} />;
+          })}
+          {hasMore && (
+            <button className="load-more-button" type="button" onClick={() => setVisibleCount((count) => count + initialLimit)}>
+              Load more reports
+            </button>
+          )}
+        </>
       ) : (
-        <p className="empty">No reports yet. Be the first to report a garbage dump in your area!</p>
+        <div className="empty-state">
+          <p className="empty-title">
+            {hasActiveFilters ? "No reports match your current filters." : emptyTitle ?? "No reports yet."}
+          </p>
+          <p className="empty">
+            {hasActiveFilters
+              ? `Try a different search, status, or ward filter. There are ${totalReports} total reports available.`
+              : emptyDescription ?? "Be the first to report a garbage dump in your area!"}
+          </p>
+          {hasActiveFilters && onClearFilters && (
+            <button className="secondary-cta" type="button" onClick={onClearFilters}>
+              Clear filters
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -666,9 +862,13 @@ function ReportListItem({
 }) {
   const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
   const wardName = getDistinctWardName(ward);
+  const upvoteCount = report.upvote_count ?? 0;
   return (
     <button className="report-item" onClick={() => onSelect(report)}>
-      <span className="report-item-badge">{report.upvote_count ?? 0}</span>
+      <span className="report-item-badge" aria-label={`${upvoteCount} ${upvoteCount === 1 ? "upvote" : "upvotes"}`}>
+        <strong>{upvoteCount}</strong>
+        <small>{upvoteCount === 1 ? "upvote" : "upvotes"}</small>
+      </span>
       <span className="report-item-body">
         <strong>{wardName || report.address}</strong>
         <small>
@@ -711,6 +911,7 @@ function ReportDetail({
   const [isUpvoting, setIsUpvoting] = useState(false);
   const [upvoted, setUpvoted] = useState(() => hasUpvoted(report.id));
   const [showResolve, setShowResolve] = useState(false);
+  const [externalPreview, setExternalPreview] = useState<ExternalPreviewConfig | null>(null);
 
   useEffect(() => {
     setUpvoted(hasUpvoted(report.id));
@@ -750,7 +951,7 @@ function ReportDetail({
     }
   };
 
-  const complaint = () => {
+  const prepareComplaint = () => {
     const text = generateBMCComplaint({
       address: report.address,
       wardName: wardName || "Bhubaneswar",
@@ -761,20 +962,52 @@ function ReportDetail({
       lat: report.latitude,
       lng: report.longitude
     });
-    window.open(getWhatsAppUrl(text), "_blank", "noopener,noreferrer");
+    setExternalPreview({
+      confirmLabel: "Open WhatsApp",
+      details: text,
+      helper: "This opens WhatsApp with a ready-to-send message. You can review or edit it before sending.",
+      title: "Send complaint on WhatsApp"
+    });
   };
 
-  const openDirections = () => {
-    window.open(`https://www.google.com/maps?q=${report.latitude},${report.longitude}`, "_blank", "noopener,noreferrer");
+  const prepareDirections = () => {
+    setExternalPreview({
+      confirmLabel: "Open Maps",
+      details: `${report.address}\nWard ${report.ward_number}\n${report.latitude}, ${report.longitude}`,
+      helper: "This opens Google Maps in a new tab so you can navigate to the reported spot.",
+      title: "Open directions"
+    });
   };
 
-  const callNumber = (value: string) => {
-    window.location.href = `tel:${value}`;
+  const prepareCall = (label: string, value: string) => {
+    setExternalPreview({
+      confirmLabel: "Call now",
+      details: value,
+      helper: `This will start a phone call to ${label}.`,
+      title: `Call ${label}`
+    });
+  };
+
+  const confirmExternalAction = () => {
+    if (!externalPreview) return;
+    if (externalPreview.confirmLabel === "Open WhatsApp") {
+      window.open(getWhatsAppUrl(externalPreview.details), "_blank", "noopener,noreferrer");
+    } else if (externalPreview.confirmLabel === "Open Maps") {
+      window.open(`https://www.google.com/maps?q=${report.latitude},${report.longitude}`, "_blank", "noopener,noreferrer");
+    } else {
+      window.location.href = `tel:${externalPreview.details}`;
+    }
+    setExternalPreview(null);
   };
 
   return (
-    <div className="modal-layer" onMouseDown={onClose}>
-      <article className="detail-sheet" onMouseDown={(event) => event.stopPropagation()}>
+    <DialogSurface
+      ariaLabel="Report details"
+      className="detail-sheet"
+      onClose={onClose}
+      disableEscape={showResolve || Boolean(externalPreview)}
+      disableFocusTrap={showResolve || Boolean(externalPreview)}
+    >
         <button className="close-button" onClick={onClose} aria-label="Close report detail">
           <X size={18} />
         </button>
@@ -813,19 +1046,19 @@ function ReportDetail({
               <Share2 size={16} />
               Share
             </button>
-            <button onClick={openDirections}>
+            <button onClick={prepareDirections}>
               <ArrowUpRight size={16} />
               Directions
             </button>
-            <button onClick={complaint}>
+            <button onClick={prepareComplaint}>
               <MessageCircle size={16} />
               WhatsApp BMC
             </button>
-            <button onClick={() => callNumber(BMC_NUMBER)}>
+            <button onClick={() => prepareCall("BMC", BMC_NUMBER)}>
               <Phone size={16} />
               Call BMC
             </button>
-            <button onClick={() => callNumber(BMC_HELPLINE)}>
+            <button onClick={() => prepareCall("Helpline 1929", BMC_HELPLINE)}>
               <Phone size={16} />
               Helpline 1929
             </button>
@@ -840,9 +1073,18 @@ function ReportDetail({
             <ShieldCheck size={13} /> All reports are anonymous
           </p>
         </div>
-      </article>
       {showResolve && <ResolveModal report={report} onClose={() => setShowResolve(false)} onResolved={onUpdate} />}
-    </div>
+      {externalPreview && (
+        <ExternalAppPreview
+          confirmLabel={externalPreview.confirmLabel}
+          details={externalPreview.details}
+          helper={externalPreview.helper}
+          title={externalPreview.title}
+          onClose={() => setExternalPreview(null)}
+          onConfirm={confirmExternalAction}
+        />
+      )}
+    </DialogSurface>
   );
 }
 
@@ -945,8 +1187,7 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
   const canRetry = status === "mismatch" || status === "error";
 
   return (
-    <div className="nested-modal">
-      <article className="mini-card">
+    <DialogSurface layerClassName="nested-modal" className="mini-card" ariaLabel="Mark report as cleaned" onClose={onClose}>
         <button className="close-button" onClick={onClose} aria-label="Close resolve modal">
           <X size={18} />
         </button>
@@ -965,13 +1206,48 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
           {canRetry && "Try Again"}
         </button>
         {status === "mismatch" && (
-          <p className="warning-text">Location mismatch — you appear to be more than 500 m from the original report.</p>
+          <p className="warning-text">We could not verify that you are near this report. Move closer to the spot and try again.</p>
         )}
         {status === "error" && saveError && (
           <p className="warning-text">{saveError}</p>
         )}
-      </article>
-    </div>
+    </DialogSurface>
+  );
+}
+
+function ExternalAppPreview({
+  confirmLabel,
+  details,
+  helper,
+  onClose,
+  onConfirm,
+  title
+}: {
+  confirmLabel: string;
+  details: string;
+  helper: string;
+  onClose: () => void;
+  onConfirm: () => void;
+  title: string;
+}) {
+  return (
+    <DialogSurface layerClassName="nested-modal" className="mini-card external-preview" ariaLabel={title} onClose={onClose}>
+      <button className="close-button" onClick={onClose} aria-label="Close WhatsApp preview">
+        <X size={18} />
+      </button>
+      <h2>{title}</h2>
+      <p>{helper}</p>
+      <pre>{details}</pre>
+      <div className="preview-actions">
+        <button className="secondary-cta" type="button" onClick={onClose}>
+          Not now
+        </button>
+        <button className="primary-cta" type="button" onClick={onConfirm}>
+          <ArrowUpRight size={16} />
+          {confirmLabel}
+        </button>
+      </div>
+    </DialogSurface>
   );
 }
 
@@ -979,33 +1255,45 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
   const [wardNumber, setWardNumber] = useState("");
   const [detectedWard, setDetectedWard] = useState<Ward | null>(null);
   const [location, setLocation] = useState<{ lat: number; lng: number; accuracy: number | null; recordedAt: string } | null>(null);
-  const [locationState, setLocationState] = useState<"idle" | "locating" | "detecting" | "detected" | "manual" | "outside">("idle");
+  const [locationState, setLocationState] = useState<"idle" | "locating" | "detecting" | "detected" | "manual" | "outside" | "unavailable" | "denied">("idle");
   const [address, setAddress] = useState("");
   const [severity, setSeverity] = useState<SeverityKey>("medium");
   const [category, setCategory] = useState<WasteCategory>("mixed");
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const [submitStage, setSubmitStage] = useState<"idle" | "uploading" | "saving">("idle");
+  const [slowSubmit, setSlowSubmit] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [submittedReviewStatus, setSubmittedReviewStatus] = useState<GarbageReport["moderation_status"] | null>(null);
+  const [formError, setFormError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<"photo" | "ward" | "address", string>>>({});
   const limit = canSubmitReport();
   const selectedWard = detectedWard ?? data.wards.find((ward) => ward.ward_number === Number(wardNumber));
 
   // Track the current object URL so we can revoke it when the user picks a
   // new photo (preventing Blob URL memory leaks on repeated retakes).
   const photoPreviewRef = useRef<string | null>(null);
+  const submitTimeoutRef = useRef<number | null>(null);
   useEffect(() => {
     return () => {
       if (photoPreviewRef.current) URL.revokeObjectURL(photoPreviewRef.current);
+      if (submitTimeoutRef.current != null) window.clearTimeout(submitTimeoutRef.current);
     };
   }, []);
 
-  // Stable ref so detectWard can be called from the mount effect without
-  // being listed in its dependency array (runs once on open, like componentDidMount).
-  const detectWardRef = useRef<() => void>();
+  const clearFieldError = (field: "photo" | "ward" | "address") => {
+    setFieldErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
 
   const detectWard = () => {
     if (!navigator.geolocation) {
-      setLocationState("manual");
+      setLocationState("unavailable");
       return;
     }
     setLocationState("locating");
@@ -1025,21 +1313,15 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
           setDetectedWard(ward);
           setWardNumber(String(ward.ward_number));
           setLocationState("detected");
+          clearFieldError("ward");
         } else {
           setLocationState("manual");
         }
       },
-      () => setLocationState("manual"),
+      (geoError) => setLocationState(geoError.code === geoError.PERMISSION_DENIED ? "denied" : "manual"),
       { enableHighAccuracy: true, timeout: 8000 }
     );
   };
-
-  detectWardRef.current = detectWard;
-
-  // Run once on mount so the form immediately mirrors the live GPS-first UX.
-  useEffect(() => {
-    detectWardRef.current?.();
-  }, []);
 
   const onFile = (file?: File) => {
     if (!file) return;
@@ -1048,20 +1330,54 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
     photoPreviewRef.current = url;
     setPhoto(file);
     setPhotoPreview(url);
+    clearFieldError("photo");
   };
 
+  const locationHelp = (() => {
+    if (locationState === "locating") return "Your browser will ask for permission. We only use it to detect the ward for this report.";
+    if (locationState === "detecting") return "Finding the matching Bhubaneswar ward...";
+    if (locationState === "detected") return `Detected Ward ${selectedWard?.ward_number ?? ""}. You can still change it manually.`;
+    if (locationState === "outside") return "Your location appears outside Bhubaneswar. Choose the ward manually if this report is inside the city.";
+    if (locationState === "denied") return "Location permission was not allowed. Choose the ward manually to continue.";
+    if (locationState === "unavailable") return "This browser cannot share location. Choose the ward manually to continue.";
+    if (locationState === "manual" && selectedWard) return "Ward selected manually. The report will use the ward center if GPS is not added.";
+    if (locationState === "manual") return "We could not detect your ward. Choose it manually to continue.";
+    return "Use current location to detect your ward faster. You can also choose the ward yourself.";
+  })();
+
+  const submitProgressText =
+    submitStage === "uploading"
+      ? "Uploading photo..."
+      : submitStage === "saving"
+        ? "Saving report..."
+        : "Submitting...";
+
   const submit = async () => {
-    setError("");
+    if (submitSuccess) return;
+    setFormError("");
+    setSlowSubmit(false);
+    const nextFieldErrors: Partial<Record<"photo" | "ward" | "address", string>> = {};
     if (!limit.allowed) {
-      setError("Thank you, amazing citizen! To protect our platform from spam, we limit reports to 5 per day.");
+      setFormError("Daily report limit reached. Please try again tomorrow.");
       return;
     }
-    if (!selectedWard || !address.trim() || !photo) {
-      setError("Photo, ward, and landmark are required.");
+    if (!photo) nextFieldErrors.photo = "Add a clear photo of the garbage spot.";
+    if (!selectedWard) nextFieldErrors.ward = "Choose a ward or use current location to detect it.";
+    if (!address.trim()) nextFieldErrors.address = "Add a nearby landmark or address so others can find the spot.";
+    setFieldErrors(nextFieldErrors);
+    if (Object.keys(nextFieldErrors).length) {
+      setFormError("Please fix the highlighted fields before submitting.");
+      return;
+    }
+    if (!photo || !selectedWard) return;
+    if (navigator.onLine === false) {
+      setFormError("You appear to be offline. Reconnect and submit the report again.");
       return;
     }
     setSubmitting(true);
+    const slowTimer = window.setTimeout(() => setSlowSubmit(true), 4500);
     try {
+      setSubmitStage("uploading");
       const photoUrl = await backend.uploadReportPhoto(photo);
       const input: NewReportInput = {
         latitude: location?.lat ?? selectedWard.center_lat,
@@ -1077,17 +1393,23 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
         category,
         photo_url: photoUrl
       };
-      onSubmit(await backend.submitReport(input));
+      setSubmitStage("saving");
+      const submitted = await backend.submitReport(input);
+      setSubmittedReviewStatus(submitted.moderation_status ?? "flagged");
+      setSubmitSuccess(true);
+      submitTimeoutRef.current = window.setTimeout(() => onSubmit(submitted), 1800);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to submit report.");
+      setFormError(caught instanceof Error ? caught.message : "Unable to submit report. Please try again.");
     } finally {
+      window.clearTimeout(slowTimer);
+      setSubmitStage("idle");
+      setSlowSubmit(false);
       setSubmitting(false);
     }
   };
 
   return (
-    <div className="modal-layer" onMouseDown={onClose}>
-      <article className="form-sheet" onMouseDown={(event) => event.stopPropagation()}>
+    <DialogSurface ariaLabel="Report garbage" className="form-sheet" onClose={onClose}>
         <div className="form-header">
           <div>
             <p className="eyebrow">Garbage Report</p>
@@ -1107,7 +1429,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
             </span>
           </div>
         )}
-        <label className="field">
+        <div className="field">
           <span>
             Photo <b>*</b>
           </span>
@@ -1115,19 +1437,30 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
             {photoPreview ? <img src={photoPreview} alt="" /> : <Camera size={30} />}
             <em>{photoPreview ? "Tap to Retake" : "Take a Photo"}</em>
             <small>A photo makes your report 10x more credible</small>
-            <input type="file" accept="image/*" capture="environment" onChange={(event) => onFile(event.target.files?.[0])} />
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              aria-invalid={Boolean(fieldErrors.photo)}
+              aria-describedby={fieldErrors.photo ? "report-photo-error" : undefined}
+              onChange={(event) => onFile(event.target.files?.[0])}
+            />
           </label>
-        </label>
+          {fieldErrors.photo && <p className="field-error" id="report-photo-error">{fieldErrors.photo}</p>}
+        </div>
         <label className="field">
           <span>
             Ward <b>*</b>
           </span>
           <select
             value={wardNumber}
+            aria-invalid={Boolean(fieldErrors.ward)}
+            aria-describedby={fieldErrors.ward ? "report-ward-error" : undefined}
             onChange={(event) => {
               setWardNumber(event.target.value);
               setDetectedWard(null);
               setLocationState("manual");
+              clearFieldError("ward");
             }}
           >
             <option value="">Select Ward...</option>
@@ -1137,23 +1470,40 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
               </option>
             ))}
           </select>
-          <button className="tiny-action" onClick={detectWard} type="button">
-            {locationState === "locating" || locationState === "detecting" ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
-            {locationState === "detected"
-              ? `Detected Ward ${selectedWard?.ward_number ?? ""}`
-              : locationState === "detecting"
-                ? "Detecting ward..."
-                : locationState === "locating"
-                  ? "Finding location..."
-                  : "Use current location"}
-          </button>
+          <div className="location-helper">
+            <span>
+              <strong>Use location to detect your ward faster</strong>
+              <small>{locationHelp}</small>
+            </span>
+            <button className="tiny-action" onClick={detectWard} type="button" disabled={locationState === "locating" || locationState === "detecting"}>
+              {locationState === "locating" || locationState === "detecting" ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
+              {locationState === "detected"
+                ? "Refresh location"
+                : locationState === "detecting"
+                  ? "Detecting..."
+                  : locationState === "locating"
+                    ? "Finding..."
+                    : "Use current location"}
+            </button>
+          </div>
+          {fieldErrors.ward && <p className="field-error" id="report-ward-error">{fieldErrors.ward}</p>}
         </label>
         <label className="field">
           <span>
             Landmark / Address <b>*</b>
           </span>
-          <input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="e.g., Near Unit 4 market, beside the temple" />
+          <input
+            value={address}
+            onChange={(event) => {
+              setAddress(event.target.value);
+              clearFieldError("address");
+            }}
+            aria-invalid={Boolean(fieldErrors.address)}
+            aria-describedby={fieldErrors.address ? "report-address-error" : undefined}
+            placeholder="e.g., Near Unit 4 market, beside the temple"
+          />
           <small>Please add a landmark or address so others can find this spot.</small>
+          {fieldErrors.address && <p className="field-error" id="report-address-error">{fieldErrors.address}</p>}
         </label>
         <label className="field">
           <span>How Bad Is It?</span>
@@ -1178,17 +1528,39 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
           </select>
         </label>
         <div className="form-footer">
-          {error && <p className="warning-text">{error}</p>}
-          <button className="primary-cta" onClick={() => void submit()} disabled={submitting}>
-            {submitting ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
-            {submitting ? "Submitting..." : "Report Garbage"}
+          {submitSuccess && (
+            <div className="notice success" role="status">
+              <CheckCircle2 size={16} />
+              <span>
+                <strong>Report submitted</strong>
+                {submittedReviewStatus === "approved"
+                  ? "Opening your report now."
+                  : "Submitted for review. It may take a moment before appearing publicly."}
+              </span>
+            </div>
+          )}
+          {submitting && (
+            <div className="notice info" role="status">
+              <LoaderCircle className="spin" size={16} />
+              <span>
+                <strong>{submitProgressText}</strong>
+                Keep this screen open while we send your photo and report details.
+              </span>
+            </div>
+          )}
+          {slowSubmit && (
+            <p className="warning-text">This is taking longer than usual. Your photo may be on a slow connection, so please keep the form open.</p>
+          )}
+          {formError && <p className="warning-text">{formError}</p>}
+          <button className="primary-cta" onClick={() => void submit()} disabled={submitting || submitSuccess}>
+            {submitting ? <LoaderCircle className="spin" size={17} /> : submitSuccess ? <CheckCircle2 size={17} /> : <Send size={17} />}
+            {submitSuccess ? "Report submitted" : submitting ? submitProgressText : "Report Garbage"}
           </button>
           <p className="anonymous">
             <ShieldCheck size={13} /> All reports are anonymous
           </p>
         </div>
-      </article>
-    </div>
+    </DialogSurface>
   );
 }
 
@@ -1218,8 +1590,7 @@ function ProfileSheet({
   const wardName = getDistinctWardName(ward);
 
   return (
-    <div className="modal-layer" onMouseDown={onClose}>
-      <article className="profile-sheet" onMouseDown={(event) => event.stopPropagation()}>
+    <DialogSurface ariaLabel={isWard ? "Ward profile" : "Representative profile"} className="profile-sheet" onClose={onClose}>
         <button className="close-button" onClick={onClose} aria-label="Close profile">
           <X size={18} />
         </button>
@@ -1249,9 +1620,16 @@ function ProfileSheet({
           </div>
         )}
         <h3>Top Locations</h3>
-        <ReportList reports={profileReports} wards={data.wards} representatives={data.representatives} onSelect={onSelectReport} />
-      </article>
-    </div>
+        <ReportList
+          reports={profileReports}
+          wards={data.wards}
+          representatives={data.representatives}
+          initialLimit={12}
+          emptyTitle="No reports linked here yet."
+          emptyDescription="When citizens report spots in this area, they will appear here."
+          onSelect={onSelectReport}
+        />
+    </DialogSurface>
   );
 }
 
@@ -1260,8 +1638,7 @@ function AboutSheet({ onClose, onOpenChangelog }: { onClose: () => void; onOpenC
   const wardEnd = BMC_CONTACTS.ward_numbers[BMC_CONTACTS.ward_numbers.length - 1];
 
   return (
-    <div className="modal-layer top" onMouseDown={onClose}>
-      <article className="top-sheet" onMouseDown={(event) => event.stopPropagation()}>
+    <DialogSurface layerClassName="modal-layer top" ariaLabel="About Amma Odisha" className="top-sheet" onClose={onClose}>
         <button className="close-button" onClick={onClose} aria-label="Close about">
           <X size={18} />
         </button>
@@ -1303,15 +1680,13 @@ function AboutSheet({ onClose, onOpenChangelog }: { onClose: () => void; onOpenC
             View Changelog
           </button>
         </div>
-      </article>
-    </div>
+    </DialogSurface>
   );
 }
 
 function ChangelogSheet({ onClose }: { onClose: () => void }) {
   return (
-    <div className="modal-layer" onMouseDown={onClose}>
-      <article className="profile-sheet small" onMouseDown={(event) => event.stopPropagation()}>
+    <DialogSurface ariaLabel="Changelog" className="profile-sheet small" onClose={onClose}>
         <button className="close-button" onClick={onClose} aria-label="Close changelog">
           <X size={18} />
         </button>
@@ -1331,8 +1706,7 @@ function ChangelogSheet({ onClose }: { onClose: () => void }) {
             ))}
           </div>
         ))}
-      </article>
-    </div>
+    </DialogSurface>
   );
 }
 

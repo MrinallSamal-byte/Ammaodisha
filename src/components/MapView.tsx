@@ -1,7 +1,9 @@
-import maplibregl, { type Map as MapLibreMap, type Marker } from "maplibre-gl";
-import { useEffect, useRef } from "react";
+import type maplibregl from "maplibre-gl";
+import type { GeoJSONSource, Map as MapLibreMap } from "maplibre-gl";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CITY_CENTER, CITY_ZOOM, MAP_STYLE, SEVERITY } from "../services/constants";
 import { createMarkerPlacements } from "../services/map-markers";
+import type { FeatureCollection, Point } from "geojson";
 import type { GarbageReport, WardFeatureCollection } from "../types/domain";
 
 interface MapViewProps {
@@ -13,109 +15,221 @@ interface MapViewProps {
   focusRequestId: number;
 }
 
+interface ReportPointProperties {
+  address: string;
+  reportId: string;
+  severityColor: string;
+  severitySize: number;
+  wardNumber: number;
+}
+
+type ReportPointCollection = FeatureCollection<Point, ReportPointProperties>;
+
+const REPORT_SOURCE_ID = "report-points";
+const CLUSTER_LAYER_ID = "report-clusters";
+const CLUSTER_COUNT_LAYER_ID = "report-cluster-count";
+const REPORT_LAYER_ID = "report-points-unclustered";
+
+function createReportPointData(reports: GarbageReport[], wardBoundaries: WardFeatureCollection): ReportPointCollection {
+  return {
+    type: "FeatureCollection",
+    features: createMarkerPlacements(reports, wardBoundaries).map(({ report, latitude, longitude }) => {
+      const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
+      return {
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: [longitude, latitude]
+        },
+        properties: {
+          address: report.address,
+          reportId: report.id,
+          severityColor: severity.color,
+          severitySize: Math.max(8, severity.size),
+          wardNumber: Number(report.ward_number)
+        }
+      };
+    })
+  };
+}
+
 export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard, focusWardNumber, focusRequestId }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
-  const markersRef = useRef<Marker[]>([]);
+  const maplibreRef = useRef<typeof maplibregl | null>(null);
+  const onSelectReportRef = useRef(onSelectReport);
+  const onSelectWardRef = useRef(onSelectWard);
+  const reportsByIdRef = useRef(new Map<string, GarbageReport>());
+  const reportPointDataRef = useRef<ReportPointCollection>({ type: "FeatureCollection", features: [] });
+  const [mapReady, setMapReady] = useState(false);
+  const reportPointData = useMemo(() => createReportPointData(reports, wardBoundaries), [reports, wardBoundaries]);
+
+  useEffect(() => {
+    onSelectReportRef.current = onSelectReport;
+    onSelectWardRef.current = onSelectWard;
+  }, [onSelectReport, onSelectWard]);
+
+  useEffect(() => {
+    reportPointDataRef.current = reportPointData;
+  }, [reportPointData]);
+
+  useEffect(() => {
+    reportsByIdRef.current = new Map(reports.map((report) => [report.id, report]));
+  }, [reports]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: MAP_STYLE,
-      center: [CITY_CENTER.longitude, CITY_CENTER.latitude],
-      zoom: CITY_ZOOM,
-      attributionControl: false
-    });
-    mapRef.current = map;
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
-    map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }), "bottom-right");
+    let cancelled = false;
+    let map: MapLibreMap | null = null;
 
-    map.on("load", () => {
-      map.addSource("wards", { type: "geojson", data: wardBoundaries });
-      map.addLayer({
-        id: "wards-fill",
-        type: "fill",
-        source: "wards",
-        paint: {
-          "fill-color": "#dc2626",
-          "fill-opacity": 0.08
-        }
+    void import("maplibre-gl").then(({ default: maplibre }) => {
+      if (cancelled || !containerRef.current) return;
+
+      maplibreRef.current = maplibre;
+      map = new maplibre.Map({
+        container: containerRef.current,
+        style: MAP_STYLE,
+        center: [CITY_CENTER.longitude, CITY_CENTER.latitude],
+        zoom: CITY_ZOOM,
+        attributionControl: false
       });
-      map.addLayer({
-        id: "wards-line",
-        type: "line",
-        source: "wards",
-        paint: {
-          "line-color": "#dc2626",
-          "line-opacity": 0.9,
-          "line-width": ["interpolate", ["linear"], ["zoom"], 9, 1.2, 12, 2.2, 14, 3]
-        }
-      });
-      map.on("click", "wards-fill", (event) => {
-        const wardNumber = Number(event.features?.[0]?.properties?.ward_number);
-        if (wardNumber) onSelectWard(wardNumber);
-      });
-      map.on("mouseenter", "wards-fill", () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
-      map.on("mouseleave", "wards-fill", () => {
-        map.getCanvas().style.cursor = "";
+      mapRef.current = map;
+      map.addControl(new maplibre.NavigationControl({ showCompass: false }), "bottom-right");
+      map.addControl(new maplibre.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }), "bottom-right");
+      map.on("load", () => {
+        if (!map) return;
+        map.addSource("wards", { type: "geojson", data: wardBoundaries });
+        map.addSource(REPORT_SOURCE_ID, {
+          type: "geojson",
+          data: reportPointDataRef.current,
+          cluster: true,
+          clusterMaxZoom: 14,
+          clusterRadius: 48
+        });
+        map.addLayer({
+          id: "wards-fill",
+          type: "fill",
+          source: "wards",
+          paint: {
+            "fill-color": "#dc2626",
+            "fill-opacity": 0.08
+          }
+        });
+        map.addLayer({
+          id: "wards-line",
+          type: "line",
+          source: "wards",
+          paint: {
+            "line-color": "#dc2626",
+            "line-opacity": 0.9,
+            "line-width": ["interpolate", ["linear"], ["zoom"], 9, 1.2, 12, 2.2, 14, 3]
+          }
+        });
+        map.addLayer({
+          id: CLUSTER_LAYER_ID,
+          type: "circle",
+          source: REPORT_SOURCE_ID,
+          filter: ["has", "point_count"],
+          paint: {
+            "circle-color": [
+              "step",
+              ["get", "point_count"],
+              "#ef4444",
+              8,
+              "#dc2626",
+              20,
+              "#b9141b"
+            ],
+            "circle-radius": [
+              "step",
+              ["get", "point_count"],
+              19,
+              8,
+              24,
+              20,
+              30
+            ],
+            "circle-stroke-color": "#ffffff",
+            "circle-stroke-width": 3,
+            "circle-opacity": 0.94
+          }
+        });
+        map.addLayer({
+          id: CLUSTER_COUNT_LAYER_ID,
+          type: "symbol",
+          source: REPORT_SOURCE_ID,
+          filter: ["has", "point_count"],
+          layout: {
+            "text-field": ["get", "point_count_abbreviated"],
+            "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+            "text-size": 12
+          },
+          paint: {
+            "text-color": "#ffffff"
+          }
+        });
+        map.addLayer({
+          id: REPORT_LAYER_ID,
+          type: "circle",
+          source: REPORT_SOURCE_ID,
+          filter: ["!", ["has", "point_count"]],
+          paint: {
+            "circle-color": ["get", "severityColor"],
+            "circle-radius": ["+", ["get", "severitySize"], 6],
+            "circle-stroke-color": "#ffffff",
+            "circle-stroke-width": 3,
+            "circle-opacity": 0.95
+          }
+        });
+        map.on("click", CLUSTER_LAYER_ID, (event) => {
+          const feature = map?.queryRenderedFeatures(event.point, { layers: [CLUSTER_LAYER_ID] })[0];
+          const clusterId = Number(feature?.properties?.cluster_id);
+          if (!map || !Number.isFinite(clusterId) || feature?.geometry.type !== "Point") return;
+          const source = map.getSource(REPORT_SOURCE_ID) as GeoJSONSource | undefined;
+          void source?.getClusterExpansionZoom(clusterId).then((zoom) => {
+            if (!map || feature.geometry.type !== "Point") return;
+            map.easeTo({
+              center: feature.geometry.coordinates as [number, number],
+              zoom: Math.min(zoom, 16)
+            });
+          });
+        });
+        map.on("click", REPORT_LAYER_ID, (event) => {
+          const reportId = String(event.features?.[0]?.properties?.reportId ?? "");
+          const report = reportsByIdRef.current.get(reportId);
+          if (report) onSelectReportRef.current(report);
+        });
+        map.on("click", "wards-fill", (event) => {
+          const wardNumber = Number(event.features?.[0]?.properties?.ward_number);
+          if (wardNumber) onSelectWardRef.current(wardNumber);
+        });
+        [CLUSTER_LAYER_ID, REPORT_LAYER_ID, "wards-fill"].forEach((layerId) => {
+          map?.on("mouseenter", layerId, () => {
+            map?.getCanvas().style.setProperty("cursor", "pointer");
+          });
+          map?.on("mouseleave", layerId, () => {
+            map?.getCanvas().style.setProperty("cursor", "");
+          });
+        });
+        setMapReady(true);
       });
     });
 
     return () => {
-      markersRef.current.forEach((marker) => marker.remove());
-      map.remove();
+      cancelled = true;
+      map?.remove();
+      setMapReady(false);
       mapRef.current = null;
+      maplibreRef.current = null;
     };
-  }, [onSelectWard, wardBoundaries]);
+  }, [wardBoundaries]);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    markersRef.current.forEach((marker) => marker.remove());
-    const placements = createMarkerPlacements(reports, wardBoundaries);
-    markersRef.current = placements.map(({ report, latitude, longitude }) => {
-        const markerEl = document.createElement("button");
-        const markerDotEl = document.createElement("span");
-        const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
-        const baseZIndex = String(Math.round(severity.size));
-        markerEl.className = "garbage-marker";
-        markerEl.type = "button";
-        markerEl.style.setProperty("--marker-color", severity.color);
-        markerEl.style.width = `${Math.max(18, severity.size + 12)}px`;
-        markerEl.style.height = `${Math.max(18, severity.size + 12)}px`;
-        markerEl.style.zIndex = baseZIndex;
-        markerEl.title = report.address;
-        markerEl.setAttribute("aria-label", `Open report at ${report.address}`);
-        markerDotEl.className = "garbage-marker-dot";
-        markerDotEl.setAttribute("aria-hidden", "true");
-        markerEl.append(markerDotEl);
-
-        markerEl.addEventListener("mouseenter", () => {
-          markerEl.style.zIndex = "1000";
-        });
-        markerEl.addEventListener("mouseleave", () => {
-          markerEl.style.zIndex = baseZIndex;
-        });
-        markerEl.addEventListener("focus", () => {
-          markerEl.style.zIndex = "1000";
-        });
-        markerEl.addEventListener("blur", () => {
-          markerEl.style.zIndex = baseZIndex;
-        });
-
-        markerEl.addEventListener("click", (event) => {
-          event.stopPropagation();
-          onSelectReport(report);
-        });
-        return new maplibregl.Marker({ element: markerEl, anchor: "center" })
-          .setLngLat([longitude, latitude])
-          .addTo(map);
-      });
-  }, [reports, onSelectReport, wardBoundaries]);
+    const source = mapRef.current?.getSource(REPORT_SOURCE_ID) as GeoJSONSource | undefined;
+    if (!mapReady || !source) return;
+    source.setData(reportPointData);
+  }, [mapReady, reportPointData]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -157,8 +271,8 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard,
         duration: 700,
         maxZoom: 14.5,
         padding: isMobile
-          ? { top: 88, right: 20, bottom: 300, left: 20 }
-          : { top: 88, right: 56, bottom: 320, left: 320 }
+          ? { top: 28, right: 20, bottom: 190, left: 20 }
+          : { top: 36, right: 56, bottom: 220, left: 56 }
       }
     );
   }, [focusWardNumber, focusRequestId, wardBoundaries]);
@@ -166,6 +280,9 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard,
   return (
     <div className="map-shell" aria-label="Amma Odisha Bhubaneswar garbage map">
       <div className="map-canvas" ref={containerRef} />
+      <div className="map-cluster-hint" aria-label="Map cluster guidance">
+        Numbered circles group nearby reports. Zoom in for individual spots.
+      </div>
     </div>
   );
 }
