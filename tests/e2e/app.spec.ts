@@ -24,8 +24,10 @@ test("report form opens as a mobile-first sheet", async ({ page }) => {
   await page.getByRole("button", { name: /Start using map/i }).click().catch(() => undefined);
   await page.getByRole("button", { name: /^Report Garbage$/i }).first().click();
   await expect(page.getByRole("heading", { name: /^Report Garbage$/i })).toBeVisible();
-  await expect(page.getByText("Take a Photo", { exact: true })).toBeVisible();
-  await expect(page.getByPlaceholder(/Near Unit 4 market/i)).toBeVisible();
+  await expect(page.getByText(/Step 1 of 3/i)).toBeVisible();
+  await expect(page.getByPlaceholder(/Type ward number or locality/i)).toBeVisible();
+  await expect(page.getByText("Take a Photo", { exact: true })).not.toBeVisible();
+  await expect(page.getByPlaceholder(/Near Unit 4 market/i)).not.toBeVisible();
 });
 
 test("mobile report controls expose search and sort", async ({ page }) => {
@@ -89,19 +91,27 @@ test("report form validates fields and confirms submission", async ({ page }) =>
   await page.goto("/");
   await page.getByRole("button", { name: /Start using map/i }).click().catch(() => undefined);
   await page.getByRole("button", { name: /^Report Garbage$/i }).first().click();
-  await page.locator(".form-sheet .primary-cta").click();
-  await expect(page.getByText(/Add a clear photo/i)).toBeVisible();
-  await expect(page.getByText(/Choose a ward/i)).toBeVisible();
-  await expect(page.getByText(/Add a nearby landmark/i)).toBeVisible();
+  await page.getByRole("button", { name: /^Next$/i }).click();
+  await expect(page.locator("#report-ward-error")).toContainText(/Search for your ward/i);
+
+  await page.getByPlaceholder(/Type ward number or locality/i).fill("1");
+  await page.getByRole("option").first().click();
+  await page.getByRole("button", { name: /^Next$/i }).click();
+  await expect(page.getByText(/Step 2 of 3/i)).toBeVisible();
+
+  await page.getByRole("button", { name: /^Next$/i }).click();
+  await expect(page.locator("#report-photo-error")).toContainText(/Add a clear photo/i);
+  await expect(page.locator("#report-address-error")).toContainText(/Add a nearby landmark/i);
 
   await page.locator(".form-sheet input[type='file']").setInputFiles({
     name: "garbage.jpg",
     mimeType: "image/jpeg",
     buffer: Buffer.from("fake-image")
   });
-  await page.getByLabel(/Ward/i).selectOption({ index: 1 });
   await page.getByPlaceholder(/Near Unit 4 market/i).fill("Near Unit 4 market");
-  await page.locator(".form-sheet .primary-cta").click();
+  await page.getByRole("button", { name: /^Next$/i }).click();
+  await expect(page.getByText(/Step 3 of 3/i)).toBeVisible();
+  await page.getByRole("button", { name: /Submit Report/i }).click();
   await expect(page.getByRole("status").getByText(/Report submitted/i)).toBeVisible();
   await expect(page.getByRole("status")).toContainText(/Submitted for review/i);
 });
@@ -115,7 +125,6 @@ test("deep links open contextual public sheets", async ({ page }) => {
   await page.getByRole("button", { name: /Get directions/i }).click();
   await expect(page.getByRole("dialog", { name: /Open directions/i })).toContainText("Google Maps");
   await page.getByRole("button", { name: /Not now/i }).click();
-  await page.getByRole("button", { name: /Contact BMC/i }).click();
   await page.getByRole("button", { name: /Call BMC/i }).click();
   await expect(page.getByRole("dialog", { name: /^Call BMC$/i })).toContainText("start a phone call");
 });

@@ -4,6 +4,7 @@ import {
   BarChart3,
   Camera,
   CheckCircle2,
+  ChevronLeft,
   ChevronDown,
   CircleAlert,
   ExternalLink,
@@ -93,6 +94,18 @@ function getDistinctWardName(ward?: Pick<Ward, "ward_number" | "ward_name"> | nu
 function getWardSelectLabel(ward: Ward) {
   const distinctName = getDistinctWardName(ward);
   return distinctName ? `Ward ${ward.ward_number} - ${distinctName}` : `Ward ${ward.ward_number}`;
+}
+
+function getWardSearchText(ward: Ward) {
+  return [
+    getWardSelectLabel(ward),
+    ward.locality_name ?? "",
+    ward.zone ?? "",
+    ward.assembly_constituency,
+    ward.parliamentary_constituency
+  ]
+    .join(" ")
+    .toLowerCase();
 }
 
 function readStorageValue(key: string) {
@@ -485,10 +498,6 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
           >
             <Info size={17} />
           </button>
-          <a className="social-link" href="https://x.com/MrinallSamal" target="_blank" rel="noreferrer" aria-label="Follow Amma Odisha updates">
-            <span>Follow</span>
-            <ExternalLink size={14} />
-          </a>
         </div>
       </header>
 
@@ -507,14 +516,18 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
           Filter
           {activeFilterCount > 0 && <span>{activeFilterCount}</span>}
         </button>
+        <button className="chip-button refresh-control" onClick={() => void refreshReports()} type="button" disabled={refreshing}>
+          {refreshing ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
+          Refresh
+        </button>
         <button className={clsx("chip-button", wardFilterNumber != null && "is-active")} onClick={detectAndFilterMyWard} type="button">
           {wardFilterState === "locating" ? <LoaderCircle className="spin" size={14} /> : <Layers size={14} />}
           {wardFilterNumber != null ? `Ward ${wardFilterNumber}` : "Use My Ward"}
         </button>
-        {isOffline && <p className="control-error offline-status">You are offline. You can browse cached reports, but submitting may fail.</p>}
-        {wardFilterState === "error" && <p className="control-error">Could not detect your location inside Bhubaneswar. You can still filter manually.</p>}
+        {isOffline && <p className="control-error offline-status" role="status">You are offline. You can browse cached reports, but submitting may fail.</p>}
+        {wardFilterState === "error" && <p className="control-error" role="alert">Could not detect your location inside Bhubaneswar. You can still filter manually.</p>}
         {refreshError && (
-          <div className="control-error control-error-action" role="status">
+          <div className="control-error control-error-action" role="alert">
             <span>{refreshError}</span>
             <button type="button" onClick={() => void refreshReports()}>
               Retry
@@ -541,6 +554,17 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
           statusFilter={statusFilter}
           visibleCount={visibleReports.length}
         />
+      )}
+
+      {viewMode === "map" && hasActiveFilters && visibleReports.length === 0 && (
+        <div className="map-empty-state" role="status">
+          <Search size={18} />
+          <strong>No reports match your filters</strong>
+          <span>Clear filters to bring the map back.</span>
+          <button type="button" onClick={clearFilters}>
+            Clear filters
+          </button>
+        </div>
       )}
 
       {viewMode === "list" && (
@@ -590,13 +614,13 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
         <button className="insights-button" type="button" onClick={() => setShowInsights(true)} aria-label="Open Amma Odisha insights">
           <BarChart3 size={18} />
           <span>
-            <strong>{visibleReports.length}</strong>
-            <small>Visible reports</small>
+            <strong>Insights</strong>
+            <small>{visibleReports.length} visible</small>
           </span>
         </button>
       </footer>
 
-      {showIntro && <IntroOverlay onClose={dismissIntro} />}
+      {showIntro && !routeSelection && <IntroOverlay onClose={dismissIntro} />}
       {showAbout && <AboutSheet onClose={() => setShowAbout(false)} onOpenChangelog={() => { setShowAbout(false); setShowChangelog(true); }} />}
       {showChangelog && <ChangelogSheet onClose={() => setShowChangelog(false)} />}
       {showInsights && (
@@ -812,6 +836,10 @@ function InsightsSheet({
 
   return (
     <DialogSurface ariaLabel="Amma Odisha insights" className="insights-sheet" onClose={onClose}>
+        <button className="sheet-back-button" type="button" onClick={onClose}>
+          <ChevronLeft size={16} />
+          Back to map
+        </button>
         <button className="close-button" onClick={onClose} aria-label="Close insights">
           <X size={18} />
         </button>
@@ -872,9 +900,9 @@ function IntroOverlay({ onClose }: { onClose: () => void }) {
       </button>
       <img src="/logo.png" alt="" />
       <p className="eyebrow">Bhubaneswar (BMC)</p>
-      <h2>Garbage reports, mapped in public.</h2>
-      <p>Report it. Photograph it. Track who is responsible.</p>
-      <small>Every dump is linked to a ward, MLA, and MP so cleanup pressure stays visible.</small>
+      <h2>Tap a red dot to see the report.</h2>
+      <p>Open a marker, check the ward and BMC actions, or start a new report.</p>
+      <small>Every report stays linked to a ward, MLA, and MP until it is cleaned.</small>
       <b>67 wards · 4 MLAs · 1 MP · All of Bhubaneswar</b>
       <button className="secondary-cta" onClick={onClose}>
         Start using map
@@ -981,6 +1009,13 @@ function ReportListItem({
   const upvoteCount = report.upvote_count ?? 0;
   return (
     <button className="report-item" onClick={() => onSelect(report)}>
+      {report.photo_url ? (
+        <img className="report-thumb" src={report.photo_url} alt="" loading="lazy" />
+      ) : (
+        <span className="photo-placeholder" aria-hidden="true">
+          <Camera size={16} />
+        </span>
+      )}
       <span className="report-item-badge" aria-label={`${upvoteCount} ${upvoteCount === 1 ? "upvote" : "upvotes"}`}>
         <strong>{upvoteCount}</strong>
         <small>{upvoteCount === 1 ? "upvote" : "upvotes"}</small>
@@ -992,7 +1027,10 @@ function ReportListItem({
         </small>
       </span>
       <span className="report-item-tags" aria-label={`${severity.label}, ${STATUS_LABELS[report.status]}`}>
-        <em className={`severity-chip severity-${report.severity}`}>{severity.label}</em>
+        <em className={`severity-chip severity-${report.severity}`}>
+          <SeverityMark severityKey={report.severity} />
+          {severity.label}
+        </em>
         {mla ? <small className="mla-label">{mla.name}</small> : <span className={clsx("status-chip", report.status === "resolved" ? "is-resolved" : "is-open")}>{STATUS_LABELS[report.status]}</span>}
       </span>
       <ChevronDown size={14} className="sideways" />
@@ -1026,20 +1064,29 @@ function ReportDetail({
 }) {
   const [isUpvoting, setIsUpvoting] = useState(false);
   const [upvoted, setUpvoted] = useState(() => hasUpvoted(report.id));
+  const [upvoteBump, setUpvoteBump] = useState(false);
   const [showResolve, setShowResolve] = useState(false);
-  const [showContactActions, setShowContactActions] = useState(false);
+  const [compareValue, setCompareValue] = useState(50);
   const [externalPreview, setExternalPreview] = useState<ExternalPreviewConfig | null>(null);
 
   useEffect(() => {
     setUpvoted(hasUpvoted(report.id));
     setIsUpvoting(false);
+    setUpvoteBump(false);
   }, [report.id]);
+
+  useEffect(() => {
+    if (!upvoteBump) return;
+    const timer = window.setTimeout(() => setUpvoteBump(false), 650);
+    return () => window.clearTimeout(timer);
+  }, [upvoteBump]);
 
   const ward = data.wards.find((item) => item.ward_number === report.ward_number);
   const wardName = getDistinctWardName(ward);
   const mla = data.representatives.find((rep) => rep.role === "mla" && rep.constituency === ward?.assembly_constituency);
   const mp = data.representatives.find((rep) => rep.role === "mp" && rep.constituency === ward?.parliamentary_constituency);
   const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
+  const canCompareResolvedPhotos = Boolean(report.photo_url && report.resolved_photo_url);
 
   const upvote = async () => {
     if (isUpvoting || upvoted) return;
@@ -1048,6 +1095,8 @@ function ReportDetail({
       const result = await backend.upvoteReport(report.id);
       setUpvoted(true);
       if (!result.alreadyVoted && result.newCount != null) {
+        setUpvoteBump(true);
+        navigator.vibrate?.(20);
         onUpdate({ ...report, upvote_count: result.newCount });
       }
     } catch (error) {
@@ -1125,6 +1174,10 @@ function ReportDetail({
       disableEscape={showResolve || Boolean(externalPreview)}
       disableFocusTrap={showResolve || Boolean(externalPreview)}
     >
+        <button className="sheet-back-button" type="button" onClick={onClose}>
+          <ChevronLeft size={16} />
+          Back to map
+        </button>
         <button className="close-button" onClick={onClose} aria-label="Close report detail">
           <X size={18} />
         </button>
@@ -1132,6 +1185,7 @@ function ReportDetail({
         <div className="detail-content">
           <div className="pill-row">
             <span className="pill" style={{ background: `${severity.color}15`, color: severity.color }}>
+              <SeverityMark severityKey={report.severity} />
               {severity.label}
             </span>
             <span className={clsx("pill", report.status === "resolved" ? "green" : "red")}>{STATUS_LABELS[report.status]}</span>
@@ -1148,6 +1202,33 @@ function ReportDetail({
             <Metric label="Age" value={`${daysActive(report.created_at)} days`} />
           </div>
 
+          {canCompareResolvedPhotos && (
+            <section className="resolved-compare" aria-label="Before and after cleanup photos">
+              <div className="sheet-title-row compact">
+                <h3>Before and after</h3>
+                <span className="pill green">Cleaned</span>
+              </div>
+              <div className="photo-compare">
+                <img src={report.photo_url ?? ""} alt="Before cleanup" />
+                <div className="photo-compare-after" style={{ clipPath: `inset(0 ${100 - compareValue}% 0 0)` }}>
+                  <img src={report.resolved_photo_url ?? ""} alt="After cleanup" />
+                </div>
+                <span className="compare-label before">Before</span>
+                <span className="compare-label after">After</span>
+              </div>
+              <label className="compare-slider">
+                <span>Slide to compare</span>
+                <input
+                  type="range"
+                  min="15"
+                  max="85"
+                  value={compareValue}
+                  onChange={(event) => setCompareValue(Number(event.target.value))}
+                />
+              </label>
+            </section>
+          )}
+
           <h3>Accountability</h3>
           <div className="rep-grid">
             <RepCard label="MLA" rep={mla} area={ward?.assembly_constituency} onClick={() => mla && openProfile({ type: "mla", id: mla.constituency })} />
@@ -1156,7 +1237,7 @@ function ReportDetail({
 
           <div className="detail-actions">
             <div className="primary-action-row">
-              <button className="primary-detail-action" onClick={() => void upvote()} disabled={upvoted || isUpvoting}>
+              <button className={clsx("primary-detail-action", upvoteBump && "is-bumped")} onClick={() => void upvote()} disabled={upvoted || isUpvoting}>
                 {isUpvoting ? <LoaderCircle className="spin" size={16} /> : <ThumbsUp size={16} />}
                 {upvoted ? "Upvoted" : "Upvote"}
               </button>
@@ -1170,32 +1251,25 @@ function ReportDetail({
               Get directions
             </button>
             <div className="contact-panel">
-              <button
-                className="contact-toggle"
-                type="button"
-                onClick={() => setShowContactActions((current) => !current)}
-                aria-expanded={showContactActions}
-              >
+              <div className="contact-heading">
                 <MessageCircle size={15} />
-                Contact BMC
-                <ChevronDown size={15} />
-              </button>
-              {showContactActions && (
-                <div className="contact-actions">
-                  <button onClick={prepareComplaint}>
-                    <MessageCircle size={16} />
-                    WhatsApp BMC
-                  </button>
-                  <button onClick={() => prepareCall("BMC", BMC_NUMBER)}>
-                    <Phone size={16} />
-                    Call BMC
-                  </button>
-                  <button onClick={() => prepareCall("Helpline 1929", BMC_HELPLINE)}>
-                    <Phone size={16} />
-                    Helpline 1929
-                  </button>
-                </div>
-              )}
+                <span>Contact BMC</span>
+                <span>Visible now</span>
+              </div>
+              <div className="contact-actions">
+                <button onClick={prepareComplaint}>
+                  <MessageCircle size={16} />
+                  WhatsApp BMC
+                </button>
+                <button onClick={() => prepareCall("BMC", BMC_NUMBER)}>
+                  <Phone size={16} />
+                  Call BMC
+                </button>
+                <button onClick={() => prepareCall("Helpline 1929", BMC_HELPLINE)}>
+                  <Phone size={16} />
+                  Helpline 1929
+                </button>
+              </div>
             </div>
             {report.status !== "resolved" && (
               <button onClick={() => setShowResolve(true)} className="green-action">
@@ -1230,6 +1304,10 @@ function Metric({ label, value }: { label: string; value: ReactNode }) {
       <span>{label}</span>
     </div>
   );
+}
+
+function SeverityMark({ severityKey }: { severityKey: SeverityKey }) {
+  return <span className={`severity-mark severity-mark-${severityKey}`} aria-hidden="true" />;
 }
 
 function RepCard({ label, rep, area, onClick }: { label: string; rep?: Representative; area?: string; onClick: () => void }) {
@@ -1297,6 +1375,7 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
         try {
           const photoUrl = photo ? await backend.uploadReportPhoto(photo) : null;
           const resolved = await backend.resolveReport(report.id, { photoUrl, lat, lng });
+          navigator.vibrate?.(35);
           onResolved(resolved);
           onClose();
         } catch (caught) {
@@ -1323,11 +1402,22 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
 
   return (
     <DialogSurface layerClassName="nested-modal" className="mini-card" ariaLabel="Mark report as cleaned" onClose={onClose}>
+        <button className="sheet-back-button" type="button" onClick={onClose}>
+          <ChevronLeft size={16} />
+          Back to report
+        </button>
         <button className="close-button" onClick={onClose} aria-label="Close resolve modal">
           <X size={18} />
         </button>
         <h2>Mark as Cleaned</h2>
         <p>Take a photo to verify this spot has been cleaned up.</p>
+        <div className="notice amber resolve-distance-notice">
+          <CircleAlert size={16} />
+          <span>
+            <strong>Be near the reported spot</strong>
+            You must be within 500m before this can be marked cleaned.
+          </span>
+        </div>
         <label className={clsx("photo-drop", preview && "has-photo")}>
           {preview ? <img src={preview} alt="" /> : <Camera size={28} />}
           <span>{preview ? "Tap to Retake" : "Take a Verification Photo"}</span>
@@ -1341,10 +1431,10 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
           {canRetry && "Try Again"}
         </button>
         {status === "mismatch" && (
-          <p className="warning-text">We could not verify that you are near this report. Move closer to the spot and try again.</p>
+          <p className="warning-text" role="alert">We could not verify that you are within 500m of this report. Move closer to the spot and try again.</p>
         )}
         {status === "error" && saveError && (
-          <p className="warning-text">{saveError}</p>
+          <p className="warning-text" role="alert">{saveError}</p>
         )}
     </DialogSurface>
   );
@@ -1367,6 +1457,10 @@ function ExternalAppPreview({
 }) {
   return (
     <DialogSurface layerClassName="nested-modal" className="mini-card external-preview" ariaLabel={title} onClose={onClose}>
+      <button className="sheet-back-button" type="button" onClick={onClose}>
+        <ChevronLeft size={16} />
+        Back to report
+      </button>
       <button className="close-button" onClick={onClose} aria-label="Close WhatsApp preview">
         <X size={18} />
       </button>
@@ -1386,8 +1480,14 @@ function ExternalAppPreview({
   );
 }
 
+type ReportFormStep = 1 | 2 | 3;
+type ReportFieldKey = "photo" | "ward" | "address";
+
 function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () => void; onSubmit: (report: GarbageReport) => void }) {
+  const [formStep, setFormStep] = useState<ReportFormStep>(1);
   const [wardNumber, setWardNumber] = useState("");
+  const [wardSearch, setWardSearch] = useState("");
+  const [wardPickerOpen, setWardPickerOpen] = useState(false);
   const [detectedWard, setDetectedWard] = useState<Ward | null>(null);
   const [location, setLocation] = useState<{ lat: number; lng: number; accuracy: number | null; recordedAt: string } | null>(null);
   const [locationState, setLocationState] = useState<"idle" | "locating" | "detecting" | "detected" | "manual" | "outside" | "unavailable" | "denied">("idle");
@@ -1402,9 +1502,42 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [submittedReviewStatus, setSubmittedReviewStatus] = useState<GarbageReport["moderation_status"] | null>(null);
   const [formError, setFormError] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<"photo" | "ward" | "address", string>>>({});
+  const [liveMessage, setLiveMessage] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<ReportFieldKey, string>>>({});
+  const [formOffline, setFormOffline] = useState(() => typeof navigator !== "undefined" && navigator.onLine === false);
   const limit = canSubmitReport();
   const selectedWard = detectedWard ?? data.wards.find((ward) => ward.ward_number === Number(wardNumber));
+  const selectedWardLabel = selectedWard ? getWardSelectLabel(selectedWard) : "";
+  const filteredWardOptions = useMemo(() => {
+    const query = wardSearch.trim().toLowerCase();
+    const digits = query.replace(/\D/g, "");
+    if (!query || (selectedWard && query === getWardSelectLabel(selectedWard).toLowerCase())) {
+      return data.wards;
+    }
+    const matches = query
+      ? data.wards.filter((ward) => getWardSearchText(ward).includes(query) || (digits ? String(ward.ward_number).includes(digits) : false))
+      : data.wards;
+
+    if (selectedWard && !matches.some((ward) => ward.ward_number === selectedWard.ward_number)) {
+      return [selectedWard, ...matches];
+    }
+    return matches;
+  }, [data.wards, selectedWard, wardSearch]);
+  const visibleWardOptions = filteredWardOptions.slice(0, 8);
+  const progressLabel =
+    formStep === 1
+      ? "Choose ward"
+      : formStep === 2
+        ? "Add evidence"
+        : "Review and submit";
+  const currentStepTitle =
+    formStep === 1
+      ? "Where is the garbage?"
+      : formStep === 2
+        ? "Add photo and landmark"
+        : "Review report";
+  const hasUnsavedInput =
+    Boolean(wardNumber || detectedWard || location || address.trim() || photo) || severity !== "medium" || category !== "mixed";
 
   // Track the current object URL so we can revoke it when the user picks a
   // new photo (preventing Blob URL memory leaks on repeated retakes).
@@ -1417,13 +1550,89 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
     };
   }, []);
 
-  const clearFieldError = (field: "photo" | "ward" | "address") => {
+  useEffect(() => {
+    const syncOnlineState = () => setFormOffline(navigator.onLine === false);
+    window.addEventListener("online", syncOnlineState);
+    window.addEventListener("offline", syncOnlineState);
+    return () => {
+      window.removeEventListener("online", syncOnlineState);
+      window.removeEventListener("offline", syncOnlineState);
+    };
+  }, []);
+
+  const requestClose = useCallback(() => {
+    if (submitting) return;
+    if (submitSuccess || !hasUnsavedInput || window.confirm("Discard this report? Your photo and details will be lost.")) {
+      onClose();
+    }
+  }, [hasUnsavedInput, onClose, submitSuccess, submitting]);
+
+  const announce = useCallback((message: string) => {
+    setLiveMessage("");
+    window.setTimeout(() => setLiveMessage(message), 20);
+  }, []);
+
+  const clearFieldError = (field: ReportFieldKey) => {
     setFieldErrors((current) => {
       if (!current[field]) return current;
       const next = { ...current };
       delete next[field];
       return next;
     });
+  };
+
+  const chooseWard = (ward: Ward) => {
+    setDetectedWard(null);
+    setWardNumber(String(ward.ward_number));
+    setWardSearch(getWardSelectLabel(ward));
+    setWardPickerOpen(false);
+    setLocationState("manual");
+    clearFieldError("ward");
+    setFormError("");
+  };
+
+  const validateStep = useCallback(
+    (step: ReportFormStep) => {
+      const nextFieldErrors: Partial<Record<ReportFieldKey, string>> = {};
+      if (step === 1 && !selectedWard) {
+        nextFieldErrors.ward = "Search for your ward and tap a result to continue.";
+      }
+      if (step === 2) {
+        if (!photo) nextFieldErrors.photo = "Add a clear photo of the garbage spot.";
+        if (!address.trim()) nextFieldErrors.address = "Add a nearby landmark or address so others can find the spot.";
+      }
+
+      if (Object.keys(nextFieldErrors).length) {
+        setFieldErrors((current) => ({ ...current, ...nextFieldErrors }));
+        announce(Object.values(nextFieldErrors)[0] ?? "Complete the required fields to continue.");
+        return false;
+      }
+
+      setFieldErrors((current) => {
+        const next = { ...current };
+        if (step === 1) delete next.ward;
+        if (step === 2) {
+          delete next.photo;
+          delete next.address;
+        }
+        return next;
+      });
+      return true;
+    },
+    [address, announce, photo, selectedWard]
+  );
+
+  const goToNextStep = () => {
+    if (formStep >= 3) return;
+    if (!validateStep(formStep)) return;
+    setFormError("");
+    setFormStep((step) => (Math.min(3, step + 1) as ReportFormStep));
+  };
+
+  const goToPreviousStep = () => {
+    if (formStep <= 1) return;
+    setFormError("");
+    setFormStep((step) => (Math.max(1, step - 1) as ReportFormStep));
   };
 
   const detectWard = () => {
@@ -1447,6 +1656,8 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
         if (ward) {
           setDetectedWard(ward);
           setWardNumber(String(ward.ward_number));
+          setWardSearch(getWardSelectLabel(ward));
+          setWardPickerOpen(false);
           setLocationState("detected");
           clearFieldError("ward");
         } else {
@@ -1466,6 +1677,13 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
     setPhoto(file);
     setPhotoPreview(url);
     clearFieldError("photo");
+  };
+
+  const removePhoto = () => {
+    if (photoPreviewRef.current) URL.revokeObjectURL(photoPreviewRef.current);
+    photoPreviewRef.current = null;
+    setPhoto(null);
+    setPhotoPreview(null);
   };
 
   const locationHelp = (() => {
@@ -1491,25 +1709,23 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
     if (submitSuccess) return;
     setFormError("");
     setSlowSubmit(false);
-    const nextFieldErrors: Partial<Record<"photo" | "ward" | "address", string>> = {};
     if (!limit.allowed) {
       setFormError("Daily report limit reached. Please try again tomorrow.");
+      announce("Daily report limit reached. Please try again tomorrow.");
       return;
     }
-    if (!photo) nextFieldErrors.photo = "Add a clear photo of the garbage spot.";
-    if (!selectedWard) nextFieldErrors.ward = "Choose a ward or use current location to detect it.";
-    if (!address.trim()) nextFieldErrors.address = "Add a nearby landmark or address so others can find the spot.";
-    setFieldErrors(nextFieldErrors);
-    if (Object.keys(nextFieldErrors).length) {
-      window.requestAnimationFrame(() => {
-        const firstInvalid = document.querySelector<HTMLElement>(".form-sheet [aria-invalid='true']");
-        (firstInvalid?.closest(".field") ?? firstInvalid)?.scrollIntoView({ behavior: "smooth", block: "center" });
-      });
+    if (!validateStep(1)) {
+      setFormStep(1);
+      return;
+    }
+    if (!validateStep(2)) {
+      setFormStep(2);
       return;
     }
     if (!photo || !selectedWard) return;
-    if (navigator.onLine === false) {
+    if (formOffline || navigator.onLine === false) {
       setFormError("You appear to be offline. Reconnect and submit the report again.");
+      announce("You are offline. Reconnect to submit this report.");
       return;
     }
     setSubmitting(true);
@@ -1535,9 +1751,12 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
       const submitted = await backend.submitReport(input);
       setSubmittedReviewStatus(submitted.moderation_status ?? "flagged");
       setSubmitSuccess(true);
+      navigator.vibrate?.(35);
       submitTimeoutRef.current = window.setTimeout(() => onSubmit(submitted), 1800);
     } catch (caught) {
-      setFormError(caught instanceof Error ? caught.message : "Unable to submit report. Please try again.");
+      const message = caught instanceof Error ? caught.message : "Unable to submit report. Please try again.";
+      setFormError(message);
+      announce(message);
     } finally {
       window.clearTimeout(slowTimer);
       setSubmitStage("idle");
@@ -1547,48 +1766,129 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
   };
 
   return (
-    <DialogSurface ariaLabel="Report garbage" className="form-sheet" onClose={onClose}>
-        <div className="form-header">
-          <div>
-            <p className="eyebrow">Garbage Report</p>
-            <h2>Report Garbage</h2>
-            <p>Confirm the ward, add a landmark, then attach a clear photo.</p>
-          </div>
-          <button className="close-button" onClick={onClose} aria-label="Close report form">
-            <X size={18} />
-          </button>
+    <DialogSurface ariaLabel="Report garbage" className="form-sheet" onClose={requestClose}>
+      {formStep > 1 && (
+        <button className="sheet-back-button form-back" type="button" onClick={goToPreviousStep}>
+          <ChevronLeft size={16} />
+          Back
+        </button>
+      )}
+      <button className="close-button" onClick={requestClose} aria-label="Close report form">
+        <X size={18} />
+      </button>
+      <div className="form-header">
+        <div>
+          <p className="eyebrow">Garbage Report</p>
+          <h2>Report Garbage</h2>
+          <p>
+            <strong>{currentStepTitle}</strong>{" "}
+            {formStep === 1 && "Pick the ward for this report."}
+            {formStep === 2 && "Add the proof people need to find the spot."}
+            {formStep === 3 && "Confirm the details before submitting."}
+          </p>
         </div>
-        {locationState === "outside" && (
-          <div className="notice amber">
-            <CircleAlert size={16} />
-            <span>
-              <strong>We are not live in your area yet</strong>
-              You can still browse reports and explore the map.
-            </span>
-          </div>
-        )}
-        <label className="field">
+      </div>
+      <div className="sr-only" aria-live="assertive" role="alert">
+        {liveMessage}
+      </div>
+      <div className="form-progress" aria-label={`Report progress step ${formStep} of 3`}>
+        <div>
+          <span>Step {formStep} of 3</span>
+          <strong>{progressLabel}</strong>
+        </div>
+        <em>{formStep === 3 ? "Final check" : "Guided report"}</em>
+        <i>
+          <b style={{ width: `${(formStep / 3) * 100}%` }} />
+        </i>
+      </div>
+      {locationState === "outside" && (
+        <div className="notice amber" role="alert">
+          <CircleAlert size={16} />
           <span>
-            Ward <b>*</b>
+            <strong>We are not live in your area yet</strong>
+            You can still browse reports and explore the map.
           </span>
-          <select
-            value={wardNumber}
-            aria-invalid={Boolean(fieldErrors.ward)}
-            aria-describedby={fieldErrors.ward ? "report-ward-error" : undefined}
-            onChange={(event) => {
-              setWardNumber(event.target.value);
-              setDetectedWard(null);
-              setLocationState("manual");
-              clearFieldError("ward");
-            }}
-          >
-            <option value="">Select Ward...</option>
-            {data.wards.map((ward) => (
-              <option key={ward.ward_number} value={ward.ward_number}>
-                {getWardSelectLabel(ward)}
-              </option>
-            ))}
-          </select>
+        </div>
+      )}
+
+      {formStep === 1 && (
+        <section className="wizard-panel" aria-labelledby="report-step-ward">
+          <div className="field">
+            <label className="field-label" htmlFor="report-ward-search" id="report-step-ward">
+              Ward <b>*</b>
+            </label>
+            <div
+              className="ward-combobox"
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  setWardPickerOpen(false);
+                }
+              }}
+            >
+              <div className="ward-search">
+                <Search size={14} />
+                <input
+                  id="report-ward-search"
+                  value={wardSearch}
+                  onFocus={() => setWardPickerOpen(true)}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setWardSearch(nextValue);
+                    setWardPickerOpen(true);
+                    if (selectedWard && nextValue !== selectedWardLabel) {
+                      setWardNumber("");
+                      setDetectedWard(null);
+                    }
+                    clearFieldError("ward");
+                  }}
+                  placeholder="Type ward number or locality"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={wardPickerOpen}
+                  aria-controls="report-ward-options"
+                  aria-invalid={Boolean(fieldErrors.ward)}
+                  aria-describedby={fieldErrors.ward ? "report-ward-error" : selectedWard ? "selected-ward" : undefined}
+                />
+              </div>
+              {wardPickerOpen && (
+                <div className="ward-options" id="report-ward-options" role="listbox" aria-label="Matching wards">
+                  {visibleWardOptions.length ? (
+                    visibleWardOptions.map((ward) => {
+                      const wardLabel = getWardSelectLabel(ward);
+                      const isSelected = selectedWard?.ward_number === ward.ward_number;
+                      return (
+                        <button
+                          key={ward.ward_number}
+                          type="button"
+                          role="option"
+                          aria-selected={isSelected}
+                          className={clsx(isSelected && "is-selected")}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => chooseWard(ward)}
+                        >
+                          <strong>{wardLabel}</strong>
+                          <small>{ward.locality_name || ward.assembly_constituency}</small>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <p>No matching wards. Try a ward number or locality.</p>
+                  )}
+                </div>
+              )}
+            </div>
+            {selectedWard && (
+              <p className="selected-ward" id="selected-ward" role="status">
+                <CheckCircle2 size={14} />
+                Selected {selectedWardLabel}
+              </p>
+            )}
+            {fieldErrors.ward && (
+              <p className="field-error" id="report-ward-error" role="alert">
+                {fieldErrors.ward}
+              </p>
+            )}
+          </div>
           <div className="location-helper">
             <span>
               <strong>Use location to detect your ward faster</strong>
@@ -1602,103 +1902,147 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
                   ? "Detecting..."
                   : locationState === "locating"
                     ? "Finding..."
-                : "Use current location"}
+                    : "Use current location"}
             </button>
           </div>
           <p className="privacy-note">Your GPS coordinates are used only to identify the ward and are not shared publicly.</p>
-          {fieldErrors.ward && <p className="field-error" id="report-ward-error">{fieldErrors.ward}</p>}
-        </label>
-        <label className="field">
-          <span>
-            Landmark / Address <b>*</b>
-          </span>
-          <input
-            value={address}
-            onChange={(event) => {
-              setAddress(event.target.value);
-              clearFieldError("address");
-            }}
-            aria-invalid={Boolean(fieldErrors.address)}
-            aria-describedby={fieldErrors.address ? "report-address-error" : undefined}
-            placeholder="e.g., Near Unit 4 market, beside the temple"
-          />
-          <small>Please add a landmark or address so others can find this spot.</small>
-          {fieldErrors.address && <p className="field-error" id="report-address-error">{fieldErrors.address}</p>}
-        </label>
-        <div className="field">
-          <span>
-            Photo <b>*</b>
-          </span>
-          <label className={clsx("photo-drop", photoPreview && "has-photo")}>
-            {photoPreview ? <img src={photoPreview} alt="" /> : <Camera size={30} />}
-            <em>{photoPreview ? "Tap to Retake" : "Take a Photo"}</em>
-            <small>Attach the photo after the location is clear.</small>
+        </section>
+      )}
+
+      {formStep === 2 && (
+        <section className="wizard-panel" aria-labelledby="report-step-evidence">
+          <label className="field" id="report-step-evidence">
+            <span>
+              Landmark / Address <b>*</b>
+            </span>
             <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              aria-invalid={Boolean(fieldErrors.photo)}
-              aria-describedby={fieldErrors.photo ? "report-photo-error" : undefined}
-              onChange={(event) => onFile(event.target.files?.[0])}
+              value={address}
+              onChange={(event) => {
+                setAddress(event.target.value);
+                clearFieldError("address");
+              }}
+              aria-invalid={Boolean(fieldErrors.address)}
+              aria-describedby={fieldErrors.address ? "report-address-error" : undefined}
+              placeholder="e.g., Near Unit 4 market, beside the temple"
             />
+            <small>Please add a landmark or address so others can find this spot.</small>
+            {fieldErrors.address && (
+              <p className="field-error" id="report-address-error" role="alert">
+                {fieldErrors.address}
+              </p>
+            )}
           </label>
-          {fieldErrors.photo && <p className="field-error" id="report-photo-error">{fieldErrors.photo}</p>}
-        </div>
-        <label className="field">
-          <span>How Bad Is It?</span>
-          <div className="option-grid">
-            {Object.entries(SEVERITY).map(([key, value]) => (
-              <button type="button" className={clsx(severity === key && "is-selected")} onClick={() => setSeverity(key as SeverityKey)} key={key}>
-                <i style={{ background: value.color }} />
-                <strong>{value.label}</strong>
-                <small>{value.description}</small>
+          <div className="field">
+            <span>
+              Photo <b>*</b>
+            </span>
+            <label className={clsx("photo-drop", photoPreview && "has-photo")}>
+              {photoPreview ? <img src={photoPreview} alt="" /> : <Camera size={30} />}
+              <em>{photoPreview ? "Tap to Retake" : "Take a Photo"}</em>
+              <small>Attach a clear photo of the garbage spot.</small>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                aria-invalid={Boolean(fieldErrors.photo)}
+                aria-describedby={fieldErrors.photo ? "report-photo-error" : undefined}
+                onChange={(event) => onFile(event.target.files?.[0])}
+              />
+            </label>
+            {photoPreview && (
+              <button className="tiny-action remove-photo" type="button" onClick={removePhoto}>
+                Remove photo
               </button>
-            ))}
+            )}
+            {fieldErrors.photo && (
+              <p className="field-error" id="report-photo-error" role="alert">
+                {fieldErrors.photo}
+              </p>
+            )}
           </div>
-        </label>
-        <label className="field">
-          <span>Waste Type</span>
-          <select value={category} onChange={(event) => setCategory(event.target.value as WasteCategory)}>
-            {Object.entries(CATEGORIES).map(([key, value]) => (
-              <option key={key} value={key}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="form-footer">
-          {submitSuccess && (
-            <div className="notice success" role="status">
-              <CheckCircle2 size={16} />
-              <span>
-                <strong>Report submitted</strong>
-                {submittedReviewStatus === "approved"
-                  ? "Opening your report now."
-                  : "Submitted for review. It may take a moment before appearing publicly."}
-              </span>
+        </section>
+      )}
+
+      {formStep === 3 && (
+        <section className="wizard-panel" aria-labelledby="report-step-review">
+          <div className="review-card" id="report-step-review">
+            <strong>{selectedWard ? selectedWardLabel : "Ward not selected"}</strong>
+            <span>{address || "No landmark added yet"}</span>
+            <small>{photo ? "Photo attached" : "Photo missing"}</small>
+          </div>
+          <label className="field">
+            <span>How Bad Is It?</span>
+            <div className="option-grid">
+              {Object.entries(SEVERITY).map(([key, value]) => (
+                <button type="button" className={clsx(severity === key && "is-selected")} onClick={() => setSeverity(key as SeverityKey)} key={key}>
+                  <SeverityMark severityKey={key as SeverityKey} />
+                  <strong>{value.label}</strong>
+                  <small>{value.description}</small>
+                </button>
+              ))}
             </div>
+          </label>
+          <label className="field">
+            <span>Waste Type</span>
+            <select value={category} onChange={(event) => setCategory(event.target.value as WasteCategory)}>
+              {Object.entries(CATEGORIES).map(([key, value]) => (
+                <option key={key} value={key}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+        </section>
+      )}
+
+      <div className="form-footer">
+        {submitSuccess && (
+          <div className="notice success" role="status">
+            <CheckCircle2 size={16} />
+            <span>
+              <strong>Report submitted</strong>
+              {submittedReviewStatus === "approved"
+                ? "Opening your report now."
+                : "Submitted for review. It may take a moment before appearing publicly."}
+            </span>
+          </div>
+        )}
+        {submitting && (
+          <div className="notice info" role="status">
+            <LoaderCircle className="spin" size={16} />
+            <span>
+              <strong>{submitProgressText}</strong>
+              Keep this screen open while we send your photo and report details.
+            </span>
+          </div>
+        )}
+        {slowSubmit && (
+          <p className="warning-text" role="alert">This is taking longer than usual. Your photo may be on a slow connection, so please keep the form open.</p>
+        )}
+        {formOffline && <p className="warning-text" role="alert">You are offline. Reconnect to submit this report.</p>}
+        {formError && <p className="warning-text" role="alert">{formError}</p>}
+        <div className="wizard-actions">
+          {formStep > 1 && (
+            <button className="secondary-cta" type="button" onClick={goToPreviousStep} disabled={submitting}>
+              <ChevronLeft size={16} />
+              Back
+            </button>
           )}
-          {submitting && (
-            <div className="notice info" role="status">
-              <LoaderCircle className="spin" size={16} />
-              <span>
-                <strong>{submitProgressText}</strong>
-                Keep this screen open while we send your photo and report details.
-              </span>
-            </div>
+          {formStep < 3 ? (
+            <button className="primary-cta" type="button" onClick={goToNextStep}>
+              Next
+            </button>
+          ) : (
+            <button className="primary-cta" onClick={() => void submit()} disabled={submitting || submitSuccess || formOffline}>
+              {submitting ? <LoaderCircle className="spin" size={17} /> : submitSuccess ? <CheckCircle2 size={17} /> : <Send size={17} />}
+              {submitSuccess ? "Report submitted" : submitting ? submitProgressText : formOffline ? "Offline - reconnect" : "Submit Report"}
+            </button>
           )}
-          {slowSubmit && (
-            <p className="warning-text">This is taking longer than usual. Your photo may be on a slow connection, so please keep the form open.</p>
-          )}
-          {formError && <p className="warning-text">{formError}</p>}
-          <button className="primary-cta" onClick={() => void submit()} disabled={submitting || submitSuccess}>
-            {submitting ? <LoaderCircle className="spin" size={17} /> : submitSuccess ? <CheckCircle2 size={17} /> : <Send size={17} />}
-            {submitSuccess ? "Report submitted" : submitting ? submitProgressText : "Report Garbage"}
-          </button>
-          <p className="anonymous">
-            <ShieldCheck size={13} /> All reports are anonymous
-          </p>
         </div>
+        <p className="anonymous">
+          <ShieldCheck size={13} /> All reports are anonymous
+        </p>
+      </div>
     </DialogSurface>
   );
 }
@@ -1730,6 +2074,10 @@ function ProfileSheet({
 
   return (
     <DialogSurface ariaLabel={isWard ? "Ward profile" : "Representative profile"} className="profile-sheet" onClose={onClose}>
+        <button className="sheet-back-button" type="button" onClick={onClose}>
+          <ChevronLeft size={16} />
+          Back to map
+        </button>
         <button className="close-button" onClick={onClose} aria-label="Close profile">
           <X size={18} />
         </button>
@@ -1805,6 +2153,9 @@ function AboutSheet({ onClose, onOpenChangelog }: { onClose: () => void; onOpenC
           <p>Coverage: {BMC_CONTACTS.total_wards} wards (Ward {wardStart} to Ward {wardEnd}).</p>
         </div>
         <div className="social-row">
+          <a href="https://x.com/MrinallSamal" target="_blank" rel="noreferrer">
+            Follow updates <ExternalLink size={13} />
+          </a>
           <a href="https://x.com/realmojojojo_" target="_blank" rel="noreferrer">
             Build By Mrinall Samal
           </a>
@@ -1851,7 +2202,15 @@ function ChangelogSheet({ onClose }: { onClose: () => void }) {
 
 function TelegramToast() {
   const [hidden, setHidden] = useState(() => readStorageValue("nk_telegram_hidden") === "1");
-  if (hidden) return null;
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    if (hidden) return;
+    const timer = window.setTimeout(() => setReady(true), 30000);
+    return () => window.clearTimeout(timer);
+  }, [hidden]);
+
+  if (hidden || !ready) return null;
   return (
     <div className="telegram-toast">
       <button

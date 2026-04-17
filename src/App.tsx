@@ -84,6 +84,11 @@ export default function App() {
         <img src="/Favicon.svg" alt="" />
         <p>Fetching Bhubaneswar ward data...</p>
         <span className="loading-progress" aria-hidden="true" />
+        <div className="loading-skeleton-list" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
       </main>
     );
   }

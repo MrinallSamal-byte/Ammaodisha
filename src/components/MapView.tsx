@@ -17,6 +17,7 @@ interface MapViewProps {
 
 interface ReportPointProperties {
   address: string;
+  isFresh: boolean;
   reportId: string;
   severityColor: string;
   severitySize: number;
@@ -28,8 +29,10 @@ type ReportPointCollection = FeatureCollection<Point, ReportPointProperties>;
 const REPORT_SOURCE_ID = "report-points";
 const CLUSTER_LAYER_ID = "report-clusters";
 const CLUSTER_COUNT_LAYER_ID = "report-cluster-count";
+const FRESH_REPORT_LAYER_ID = "report-fresh-pulse";
 const REPORT_LAYER_ID = "report-points-unclustered";
 const CLUSTER_HINT_KEY = "nk_cluster_hint_seen";
+const FRESH_REPORT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 function shouldShowClusterHint() {
   try {
@@ -60,6 +63,7 @@ function createReportPointData(reports: GarbageReport[], wardBoundaries: WardFea
         },
         properties: {
           address: report.address,
+          isFresh: Date.now() - new Date(report.created_at).getTime() < FRESH_REPORT_WINDOW_MS,
           reportId: report.id,
           severityColor: severity.color,
           severitySize: Math.max(8, severity.size),
@@ -100,7 +104,7 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard,
     const timer = window.setTimeout(() => {
       setShowClusterHint(false);
       markClusterHintSeen();
-    }, 6000);
+    }, 12000);
     return () => window.clearTimeout(timer);
   }, [showClusterHint]);
 
@@ -209,6 +213,23 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard,
             "circle-opacity": 0.95
           }
         });
+        map.addLayer(
+          {
+            id: FRESH_REPORT_LAYER_ID,
+            type: "circle",
+            source: REPORT_SOURCE_ID,
+            filter: ["all", ["!", ["has", "point_count"]], ["==", ["get", "isFresh"], true]],
+            paint: {
+              "circle-color": ["get", "severityColor"],
+              "circle-radius": ["+", ["get", "severitySize"], 20],
+              "circle-opacity": 0.18,
+              "circle-stroke-color": ["get", "severityColor"],
+              "circle-stroke-opacity": 0.28,
+              "circle-stroke-width": 2
+            }
+          },
+          REPORT_LAYER_ID
+        );
         map.on("click", CLUSTER_LAYER_ID, (event) => {
           const feature = map?.queryRenderedFeatures(event.point, { layers: [CLUSTER_LAYER_ID] })[0];
           const clusterId = Number(feature?.properties?.cluster_id);
@@ -257,6 +278,19 @@ export function MapView({ reports, wardBoundaries, onSelectReport, onSelectWard,
     if (!mapReady || !source) return;
     source.setData(reportPointData);
   }, [mapReady, reportPointData]);
+
+  useEffect(() => {
+    if (!mapReady) return;
+    const timer = window.setInterval(() => {
+      const map = mapRef.current;
+      if (!map?.getLayer(FRESH_REPORT_LAYER_ID)) return;
+      const progress = (Date.now() % 1700) / 1700;
+      map.setPaintProperty(FRESH_REPORT_LAYER_ID, "circle-radius", ["+", ["get", "severitySize"], 14 + progress * 18]);
+      map.setPaintProperty(FRESH_REPORT_LAYER_ID, "circle-opacity", 0.24 * (1 - progress));
+      map.setPaintProperty(FRESH_REPORT_LAYER_ID, "circle-stroke-opacity", 0.34 * (1 - progress));
+    }, 120);
+    return () => window.clearInterval(timer);
+  }, [mapReady]);
 
   useEffect(() => {
     const map = mapRef.current;
