@@ -73,6 +73,12 @@ export interface GarbageReport {
   category: WasteCategory;
   status: ReportStatus;
   photo_url?: string | null;
+  photo_source_url?: string | null;
+  photo_source_title?: string | null;
+  photo_license?: string | null;
+  photo_credit?: string | null;
+  photo_width?: number | null;
+  photo_height?: number | null;
   reporter_id?: string | null;
   reporter_name?: string | null;
   upvote_count: number;
@@ -113,7 +119,17 @@ export interface ResolveReportInput {
   name?: string;
 }
 
+export interface UploadReportPhotoOptions {
+  onProgress?: (progress: number) => void;
+}
+
 export type WardFeatureCollection = FeatureCollection<Polygon | MultiPolygon, WardFeatureProperties>;
+export type CityBoundaryFeatureCollection = FeatureCollection<Polygon | MultiPolygon, CityBoundaryProperties>;
+
+export interface CityBoundaryProperties {
+  Name?: string;
+  [key: string]: unknown;
+}
 
 export interface WardFeatureProperties {
   ward_number: number;
@@ -125,6 +141,7 @@ export interface WardFeatureProperties {
 
 export interface CivicData {
   wards: Ward[];
+  cityBoundary: CityBoundaryFeatureCollection;
   wardBoundaries: WardFeatureCollection;
   representatives: Representative[];
   reports: GarbageReport[];
@@ -146,7 +163,7 @@ export interface Backend {
   submitReport(input: NewReportInput): Promise<GarbageReport>;
   resolveReport(reportId: string, input: ResolveReportInput): Promise<GarbageReport>;
   upvoteReport(reportId: string): Promise<{ alreadyVoted: boolean; newCount?: number }>;
-  uploadReportPhoto(file: File): Promise<string | null>;
+  uploadReportPhoto(file: File, options?: UploadReportPhotoOptions): Promise<string | null>;
   adminStats(adminKey: string): Promise<AdminStats>;
   adminQueue(adminKey: string, status: ModerationStatus): Promise<GarbageReport[]>;
   moderateReport(adminKey: string, reportId: string, decision: ModerationStatus): Promise<void>;

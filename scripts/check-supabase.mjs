@@ -72,10 +72,10 @@ for (const result of checks) {
 const failures = checks.filter((result) => !result.ok);
 if (failures.length) {
   console.error(`Supabase check failed: ${failures.length} issue${failures.length === 1 ? "" : "s"} found.`);
-  process.exit(1);
+  process.exitCode = 1;
+} else {
+  console.log("Supabase check passed.");
 }
-
-console.log("Supabase check passed.");
 
 async function checkTable(supabase, tableName, columnName) {
   await check(`Table ${tableName} is readable`, async () => {

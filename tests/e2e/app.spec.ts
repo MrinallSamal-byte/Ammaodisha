@@ -7,9 +7,10 @@ test("public map shell loads", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("button", { name: /About Amma Odisha/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /Report Garbage/i })).toBeVisible();
-  await expect(page.getByLabel("Amma Odisha civic reporting context")).toContainText("Bhubaneswar accountability");
+  await expect(page.getByRole("dialog", { name: /Amma Odisha intro/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /Open Amma Odisha insights/i })).toBeVisible();
   await expect(page.getByLabel("Map cluster guidance")).toContainText("Grouped reports");
+  await expect(page.getByLabel("Visible map report statistics")).toBeVisible();
 });
 
 test("list mode exposes the issue feed", async ({ page }) => {
@@ -17,6 +18,32 @@ test("list mode exposes the issue feed", async ({ page }) => {
   await page.getByRole("button", { name: /Start using map/i }).click().catch(() => undefined);
   await page.getByRole("button", { name: /^List$/i }).click();
   await expect(page.locator(".report-item").first()).toBeVisible();
+});
+
+test("map-first controls filter reports directly", async ({ page, isMobile }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /Start using map/i }).click().catch(() => undefined);
+  if (isMobile) {
+    await expect(page.getByLabel("Filter map by severity")).toBeHidden();
+    await expect(page.getByLabel("Filter map by status")).toBeHidden();
+    await page.getByRole("button", { name: /Open search and filters/i }).click();
+    const filterDialog = page.getByRole("dialog", { name: /Search and filter reports/i });
+    await filterDialog.getByLabel("Filter by severity").selectOption("massive");
+    await filterDialog.getByLabel("Filter by status").selectOption("resolved");
+    await expect(filterDialog.getByLabel("Active report filters")).toContainText("Severity: Critical");
+    await expect(filterDialog.getByLabel("Active report filters")).toContainText("Status: Cleaned");
+    return;
+  }
+
+  await expect(page.getByLabel("Filter map by severity")).toBeVisible();
+  await expect(page.getByLabel("Filter map by status")).toBeVisible();
+
+  await page.getByLabel("Filter map by severity").selectOption("massive");
+  await expect(page.getByRole("button", { name: /Open search and filters/i })).toContainText("1");
+
+  await page.getByLabel("Filter map by status").selectOption("resolved");
+  await expect(page.getByRole("button", { name: /Open search and filters/i })).toContainText("2");
+  await expect(page.getByLabel("Visible map report statistics")).toBeVisible();
 });
 
 test("report form opens as a mobile-first sheet", async ({ page }) => {
@@ -34,10 +61,9 @@ test("mobile report controls expose search and sort", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await page.getByRole("button", { name: /Start using map/i }).click().catch(() => undefined);
-  await page.getByRole("button", { name: /Open search and filters/i }).click();
-  const filterDialog = page.getByRole("dialog", { name: /Search and filter reports/i });
-  await expect(filterDialog.getByLabel("Search reports")).toBeVisible();
-  await expect(filterDialog.getByLabel("Sort reports")).toBeVisible();
+  await page.getByRole("button", { name: /^List$/i }).click();
+  await expect(page.locator(".list-tools").getByLabel("Search reports")).toBeVisible();
+  await expect(page.locator(".list-tools").getByLabel("Sort reports")).toBeVisible();
 });
 
 test("report form requests location only after user action", async ({ page }) => {
@@ -67,9 +93,9 @@ test("report form requests location only after user action", async ({ page }) =>
   await page.goto("/");
   await page.getByRole("button", { name: /Start using map/i }).click().catch(() => undefined);
   await page.getByRole("button", { name: /^Report Garbage$/i }).first().click();
-  await expect(page.getByText(/Use current location to detect your ward faster/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /Detect My Ward/i })).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("geo-calls") || "0")).toBe("0");
-  await page.getByRole("button", { name: /Use current location/i }).click();
+  await page.getByRole("button", { name: /Detect My Ward/i }).click();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("geo-calls") || "0")).toBe("1");
 });
 
@@ -95,7 +121,7 @@ test("report form validates fields and confirms submission", async ({ page }) =>
   await expect(page.locator("#report-ward-error")).toContainText(/Search for your ward/i);
 
   await page.getByPlaceholder(/Type ward number or locality/i).fill("1");
-  await page.getByRole("option").first().click();
+  await page.getByRole("listbox", { name: /Matching wards/i }).getByRole("option").first().click();
   await page.getByRole("button", { name: /^Next$/i }).click();
   await expect(page.getByText(/Step 2 of 3/i)).toBeVisible();
 
@@ -121,7 +147,11 @@ test("deep links open contextual public sheets", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Ward 5" })).toBeVisible();
 
   await page.goto(`/report/${reports[0].id}`);
-  await expect(page.getByRole("button", { name: /Close report detail/i })).toBeVisible();
+  await expect.poll(async () => {
+    const closeVisible = await page.getByRole("button", { name: /Close report detail/i }).isVisible().catch(() => false);
+    const backVisible = await page.getByRole("button", { name: /Back to map/i }).isVisible().catch(() => false);
+    return closeVisible || backVisible;
+  }).toBe(true);
   await page.getByRole("button", { name: /Get directions/i }).click();
   await expect(page.getByRole("dialog", { name: /Open directions/i })).toContainText("Google Maps");
   await page.getByRole("button", { name: /Not now/i }).click();

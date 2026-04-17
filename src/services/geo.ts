@@ -1,5 +1,4 @@
-import { CITY_BOUNDARY } from "./constants";
-import type { Ward, WardFeatureCollection } from "../types/domain";
+import type { CityBoundaryFeatureCollection, Ward, WardFeatureCollection } from "../types/domain";
 
 export function pointInRing(point: [number, number], ring: [number, number][]) {
   const [x, y] = point;
@@ -13,8 +12,17 @@ export function pointInRing(point: [number, number], ring: [number, number][]) {
   return inside;
 }
 
-export function isInsideCity(lat: number, lng: number) {
-  return pointInRing([lng, lat], CITY_BOUNDARY);
+export function isInsideBoundary(lat: number, lng: number, boundary: CityBoundaryFeatureCollection) {
+  const point: [number, number] = [lng, lat];
+  return boundary.features.some((feature) => {
+    const geometry = feature.geometry;
+    const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
+    return polygons.some((polygon) => {
+      const outer = polygon[0] as [number, number][];
+      const holes = polygon.slice(1) as [number, number][][];
+      return pointInRing(point, outer) && !holes.some((hole) => pointInRing(point, hole));
+    });
+  });
 }
 
 export function findWardInGeoJson(lat: number, lng: number, wards: Ward[], boundaries: WardFeatureCollection) {

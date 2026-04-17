@@ -1,16 +1,18 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { IS_STAGING, LOCAL_REPORTS_KEY } from "./constants";
-import { findNearestWard, findWardInGeoJson, isInsideCity, pointInRing } from "./geo";
+import { findNearestWard, findWardInGeoJson, isInsideBoundary, pointInRing } from "./geo";
 import { canSubmitReport, getFingerprint, hasUpvoted, markUpvoted, recordSubmission } from "./limits";
 import type {
   AdminStats,
   Backend,
+  CityBoundaryFeatureCollection,
   CivicData,
   GarbageReport,
   ModerationStatus,
   NewReportInput,
   Representative,
   ResolveReportInput,
+  UploadReportPhotoOptions,
   Ward,
   WardFeatureCollection
 } from "../types/domain";
@@ -50,6 +52,17 @@ interface PoliticalMappingData {
     current_member?: PoliticalRepresentativeProfile;
   };
   records?: PoliticalAssemblyRecord[];
+}
+
+interface ReportImageReplacement {
+  credit?: string | null;
+  height?: number | null;
+  license?: string | null;
+  original_url?: string | null;
+  photo_url: string;
+  source_page?: string | null;
+  title?: string | null;
+  width?: number | null;
 }
 
 function hasSupabaseConfig() {
@@ -219,6 +232,47 @@ function hashString(input: string) {
   return hash >>> 0;
 }
 
+let reportImageReplacementCache: Promise<ReportImageReplacement[]> | null = null;
+
+function fetchReportImageReplacements() {
+  if (!reportImageReplacementCache) {
+    reportImageReplacementCache = fetchJson<ReportImageReplacement[]>("/report-image-sources.json").catch(() => []);
+  }
+  return reportImageReplacementCache;
+}
+
+function isLegacyReportPhoto(report: GarbageReport) {
+  const photoUrl = report.photo_url ?? "";
+  return /tcldazhypyuutdpoksfx\.supabase\.co\/storage\/v1\/object\/public\/garbage-photos\/reports\//i.test(photoUrl);
+}
+
+function addReportImageAttribution(report: GarbageReport, image: ReportImageReplacement): GarbageReport {
+  return {
+    ...report,
+    photo_url: image.photo_url,
+    photo_source_url: image.source_page ?? report.photo_source_url ?? null,
+    photo_source_title: image.title ?? report.photo_source_title ?? null,
+    photo_license: image.license ?? report.photo_license ?? null,
+    photo_credit: image.credit ?? report.photo_credit ?? "Wikimedia Commons",
+    photo_width: image.width ?? report.photo_width ?? null,
+    photo_height: image.height ?? report.photo_height ?? null
+  };
+}
+
+function applyReportImageReplacements(reports: GarbageReport[], replacements: ReportImageReplacement[]) {
+  if (!replacements.length) return reports;
+
+  const replacementsByUrl = new Map(replacements.map((image) => [image.photo_url, image]));
+  return reports.map((report) => {
+    const existingReplacement = report.photo_url ? replacementsByUrl.get(report.photo_url) : null;
+    if (existingReplacement) return addReportImageAttribution(report, existingReplacement);
+    if (!isLegacyReportPhoto(report)) return report;
+
+    const image = replacements[hashString(report.id) % replacements.length];
+    return addReportImageAttribution(report, image);
+  });
+}
+
 function mulberry32(seed: number) {
   return () => {
     let next = (seed += 0x6d2b79f5);
@@ -280,10 +334,15 @@ function shouldRewriteAddress(address: string, outsideCity: boolean) {
   return /bengaluru|bangalore|karnataka|hsr|koramangala|marathahalli|mahadevapura|banashankari/i.test(address);
 }
 
-function normalizeToBhubaneswar(report: GarbageReport, wards: Ward[], boundaries: WardFeatureCollection): GarbageReport {
+function normalizeToBhubaneswar(
+  report: GarbageReport,
+  wards: Ward[],
+  boundaries: WardFeatureCollection,
+  cityBoundary: CityBoundaryFeatureCollection
+): GarbageReport {
   const latitude = Number(report.latitude);
   const longitude = Number(report.longitude);
-  const outsideCity = !isInsideCity(latitude, longitude);
+  const outsideCity = !isInsideBoundary(latitude, longitude, cityBoundary);
   const wardFromPoint = findWardInGeoJson(latitude, longitude, wards, boundaries);
   const ward =
     wardFromPoint ??
@@ -306,8 +365,13 @@ function normalizeToBhubaneswar(report: GarbageReport, wards: Ward[], boundaries
   };
 }
 
-function normalizeReportsForBhubaneswar(reports: GarbageReport[], wards: Ward[], boundaries: WardFeatureCollection) {
-  return reports.map((report) => normalizeToBhubaneswar(report, wards, boundaries));
+function normalizeReportsForBhubaneswar(
+  reports: GarbageReport[],
+  wards: Ward[],
+  boundaries: WardFeatureCollection,
+  cityBoundary: CityBoundaryFeatureCollection
+) {
+  return reports.map((report) => normalizeToBhubaneswar(report, wards, boundaries, cityBoundary));
 }
 
 // ─── localStorage helpers ─────────────────────────────────────────────────────
@@ -346,10 +410,22 @@ function upsertLocalReports(nextReports: GarbageReport[]) {
 
 // ─── Image utilities ──────────────────────────────────────────────────────────
 
-async function fileToDataUrl(file: File): Promise<string> {
+function reportUploadProgress(options: UploadReportPhotoOptions | undefined, value: number) {
+  options?.onProgress?.(Math.max(0, Math.min(100, Math.round(value))));
+}
+
+async function fileToDataUrl(file: File, options?: UploadReportPhotoOptions): Promise<string> {
+  reportUploadProgress(options, 0);
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
+    reader.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      reportUploadProgress(options, (event.loaded / event.total) * 100);
+    };
+    reader.onload = () => {
+      reportUploadProgress(options, 100);
+      resolve(String(reader.result));
+    };
     reader.onerror = () => reject(reader.error ?? new Error("FileReader error"));
     reader.readAsDataURL(file);
   });
@@ -387,6 +463,59 @@ async function compressImage(file: File): Promise<File> {
   });
 }
 
+function uploadStorageObjectWithProgress({
+  bucket,
+  contentType,
+  file,
+  options,
+  path
+}: {
+  bucket: string;
+  contentType: string;
+  file: File;
+  options?: UploadReportPhotoOptions;
+  path: string;
+}) {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const url = `${supabaseUrl}/storage/v1/object/${bucket}/${encodedPath}`;
+
+  return new Promise<void>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", url);
+    request.setRequestHeader("Authorization", `Bearer ${supabaseAnonKey}`);
+    request.setRequestHeader("apikey", supabaseAnonKey!);
+    request.setRequestHeader("Cache-Control", "3600");
+    request.setRequestHeader("Content-Type", contentType);
+    request.setRequestHeader("x-upsert", "false");
+
+    request.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      reportUploadProgress(options, 5 + (event.loaded / event.total) * 94);
+    };
+
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        reportUploadProgress(options, 100);
+        resolve();
+        return;
+      }
+      let message = request.statusText || `Upload failed with status ${request.status}`;
+      try {
+        const body = JSON.parse(request.responseText) as { message?: string; error?: string };
+        message = body.message || body.error || message;
+      } catch {
+        if (request.responseText) message = request.responseText;
+      }
+      reject(new Error(message));
+    };
+    request.onerror = () => reject(new Error("Photo upload failed. Check your connection and try again."));
+    request.onabort = () => reject(new Error("Photo upload was cancelled."));
+
+    reportUploadProgress(options, 1);
+    request.send(file);
+  });
+}
+
 // ─── LocalBackend ─────────────────────────────────────────────────────────────
 
 class LocalBackend implements Backend {
@@ -394,12 +523,14 @@ class LocalBackend implements Backend {
 
   async fetchCivicData() {
     if (!this.data) {
-      const [wardSeed, wardBoundaries, representativeSeed, reports, politicalMapping] = await Promise.all([
+      const [wardSeed, wardBoundaries, cityBoundary, representativeSeed, reports, politicalMapping, replacementImages] = await Promise.all([
         fetchJson<Ward[]>("/wards.json"),
         fetchJson<WardFeatureCollection>("/ward-boundaries.json"),
+        fetchJson<CityBoundaryFeatureCollection>("/bmc-boundary.json"),
         fetchJson<Representative[]>("/representatives.json").catch(() => [] as Representative[]),
         fetchJson<GarbageReport[]>("/reports.json"),
-        fetchJson<PoliticalMappingData>("/bbsr-political-mapping.json").catch(() => null)
+        fetchJson<PoliticalMappingData>("/bbsr-political-mapping.json").catch(() => null),
+        fetchReportImageReplacements()
       ]);
 
       const wards = applyWardConstituencyMapping(wardSeed, politicalMapping);
@@ -407,9 +538,13 @@ class LocalBackend implements Backend {
 
       this.data = {
         wards,
+        cityBoundary,
         wardBoundaries,
         representatives,
-        reports: normalizeReportsForBhubaneswar(mergeLocalReports(reports), wards, wardBoundaries)
+        reports: applyReportImageReplacements(
+          normalizeReportsForBhubaneswar(mergeLocalReports(reports), wards, wardBoundaries, cityBoundary),
+          replacementImages
+        )
       };
     }
     return this.data;
@@ -418,8 +553,9 @@ class LocalBackend implements Backend {
   async fetchReports() {
     const data = await this.fetchCivicData();
     // Re-merge from localStorage so in-session submissions are always reflected.
-    const reports = normalizeReportsForBhubaneswar(mergeLocalReports(data.reports), data.wards, data.wardBoundaries);
-    return reports.filter((report) => report.moderation_status !== "rejected");
+    const replacementImages = await fetchReportImageReplacements();
+    const reports = normalizeReportsForBhubaneswar(mergeLocalReports(data.reports), data.wards, data.wardBoundaries, data.cityBoundary);
+    return applyReportImageReplacements(reports, replacementImages).filter((report) => report.moderation_status !== "rejected");
   }
 
   async fetchReportById(id: string) {
@@ -510,8 +646,8 @@ class LocalBackend implements Backend {
     return { alreadyVoted: false, newCount };
   }
 
-  async uploadReportPhoto(file: File) {
-    return fileToDataUrl(file);
+  async uploadReportPhoto(file: File, options?: UploadReportPhotoOptions) {
+    return fileToDataUrl(file, options);
   }
 
   async adminStats(adminKey: string) {
@@ -591,6 +727,12 @@ class SupabaseBackend extends LocalBackend {
     this.client = createClient(supabaseUrl!, supabaseAnonKey!);
   }
 
+  private async fetchWardBoundaries() {
+    const { data, error } = await this.client.rpc("get_all_ward_boundaries");
+    if (!error && data) return data as WardFeatureCollection;
+    return fetchJson<WardFeatureCollection>("/ward-boundaries.json");
+  }
+
   private async mergeDerivedUpvoteCounts(reports: GarbageReport[]) {
     if (!reports.length) return reports;
 
@@ -632,14 +774,15 @@ class SupabaseBackend extends LocalBackend {
   }
 
   override async fetchCivicData(): Promise<CivicData> {
-    const [wards, representatives, reports, wardBoundaries, politicalMapping] = await Promise.all([
+    const [wards, representatives, reports, wardBoundaries, cityBoundary, politicalMapping] = await Promise.all([
       this.client
         .from("wards")
         .select("ward_number, ward_name, zone, assembly_constituency, parliamentary_constituency, center_lat, center_lng, locality_name")
         .order("ward_number"),
       this.client.from("representatives").select("*").eq("active", true),
       this.fetchReports(),
-      fetchJson<WardFeatureCollection>("/ward-boundaries.json"),
+      this.fetchWardBoundaries(),
+      fetchJson<CityBoundaryFeatureCollection>("/bmc-boundary.json"),
       fetchJson<PoliticalMappingData>("/bbsr-political-mapping.json").catch(() => null)
     ]);
     if (wards.error) throw wards.error;
@@ -649,8 +792,9 @@ class SupabaseBackend extends LocalBackend {
 
     return {
       wards: safeWards,
+      cityBoundary,
       representatives: safeRepresentatives,
-      reports: normalizeReportsForBhubaneswar(reports, safeWards, wardBoundaries),
+      reports: normalizeReportsForBhubaneswar(reports, safeWards, wardBoundaries, cityBoundary),
       wardBoundaries
     };
   }
@@ -665,14 +809,16 @@ class SupabaseBackend extends LocalBackend {
     const { data, error } = await query;
     if (error) throw error;
     const withCounts = await this.mergeDerivedUpvoteCounts((data ?? []) as GarbageReport[]);
-    return withCounts.map(normalizeReport);
+    const replacementImages = await fetchReportImageReplacements();
+    return applyReportImageReplacements(withCounts.map(normalizeReport), replacementImages);
   }
 
   override async fetchReportById(id: string) {
     const { data, error } = await this.client.from("garbage_reports").select("*").eq("id", id).single();
     if (error) return null;
     const [reportWithCount] = await this.mergeDerivedUpvoteCounts([data as GarbageReport]);
-    return normalizeReport(reportWithCount);
+    const replacementImages = await fetchReportImageReplacements();
+    return applyReportImageReplacements([normalizeReport(reportWithCount)], replacementImages)[0] ?? null;
   }
 
   override async fetchReportsByWard(wardNumber: number) {
@@ -684,7 +830,8 @@ class SupabaseBackend extends LocalBackend {
       .order("created_at", { ascending: false });
     if (error) throw error;
     const withCounts = await this.mergeDerivedUpvoteCounts((data ?? []) as GarbageReport[]);
-    return withCounts.map(normalizeReport);
+    const replacementImages = await fetchReportImageReplacements();
+    return applyReportImageReplacements(withCounts.map(normalizeReport), replacementImages);
   }
 
   override async fetchReportsByConstituency(constituency: string, type: "mla" | "mp") {
@@ -700,7 +847,8 @@ class SupabaseBackend extends LocalBackend {
       .order("created_at", { ascending: false });
     if (reportError) throw reportError;
     const withCounts = await this.mergeDerivedUpvoteCounts((data ?? []) as GarbageReport[]);
-    return withCounts.map(normalizeReport);
+    const replacementImages = await fetchReportImageReplacements();
+    return applyReportImageReplacements(withCounts.map(normalizeReport), replacementImages);
   }
 
   override async submitReport(input: NewReportInput) {
@@ -751,16 +899,19 @@ class SupabaseBackend extends LocalBackend {
     return { alreadyVoted: false, newCount };
   }
 
-  override async uploadReportPhoto(file: File) {
+  override async uploadReportPhoto(file: File, options?: UploadReportPhotoOptions) {
+    reportUploadProgress(options, 0);
     const compressed = await compressImage(file);
+    reportUploadProgress(options, 5);
     const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
     const path = `reports/${name}`;
-    const { error } = await this.client.storage.from("garbage-photos").upload(path, compressed, {
-      cacheControl: "3600",
-      upsert: false,
-      contentType: "image/jpeg"
+    await uploadStorageObjectWithProgress({
+      bucket: "garbage-photos",
+      contentType: compressed.type || "image/jpeg",
+      file: compressed,
+      options,
+      path
     });
-    if (error) throw error;
     return this.client.storage.from("garbage-photos").getPublicUrl(path).data.publicUrl;
   }
 

@@ -2,6 +2,11 @@ import type { SeverityKey, WasteCategory } from "../types/domain";
 
 export const CITY_CENTER = { latitude: 20.2961, longitude: 85.8245 };
 export const CITY_ZOOM = 12;
+export const CITY_MIN_ZOOM = 10;
+export const CITY_MAX_BOUNDS: [[number, number], [number, number]] = [
+  [85.65, 20.1],
+  [86, 20.45]
+];
 export const MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 export const BMC_WHATSAPP = "916742432100";
 
@@ -88,14 +93,6 @@ export const PARTY_COLORS: Record<string, string> = {
   JDS: "#00C853",
   AAP: "#5C6BC0"
 };
-
-export const CITY_BOUNDARY: [number, number][] = [
-  [85.70, 20.15],
-  [85.70, 20.40],
-  [85.95, 20.40],
-  [85.95, 20.15],
-  [85.70, 20.15]
-];
 
 export const ESCALATION_THRESHOLDS = [3, 5, 10, 20, 50];
 export const MAX_REPORTS_PER_DAY = 5;
