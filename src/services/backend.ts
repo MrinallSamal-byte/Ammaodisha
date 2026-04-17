@@ -259,16 +259,59 @@ function addReportImageAttribution(report: GarbageReport, image: ReportImageRepl
   };
 }
 
+function clearDuplicateReportImage(report: GarbageReport): GarbageReport {
+  return {
+    ...report,
+    photo_url: null,
+    photo_source_url: null,
+    photo_source_title: null,
+    photo_license: null,
+    photo_credit: null,
+    photo_width: null,
+    photo_height: null
+  };
+}
+
+function pickUnusedReportImage(replacements: ReportImageReplacement[], usedPhotoUrls: Set<string>, seed: string) {
+  if (!replacements.length || usedPhotoUrls.size >= replacements.length) return null;
+
+  const startIndex = hashString(seed) % replacements.length;
+  for (let offset = 0; offset < replacements.length; offset += 1) {
+    const image = replacements[(startIndex + offset) % replacements.length];
+    if (!usedPhotoUrls.has(image.photo_url)) return image;
+  }
+
+  return null;
+}
+
 function applyReportImageReplacements(reports: GarbageReport[], replacements: ReportImageReplacement[]) {
   if (!replacements.length) return reports;
 
-  const replacementsByUrl = new Map(replacements.map((image) => [image.photo_url, image]));
-  return reports.map((report) => {
-    const existingReplacement = report.photo_url ? replacementsByUrl.get(report.photo_url) : null;
-    if (existingReplacement) return addReportImageAttribution(report, existingReplacement);
-    if (!isLegacyReportPhoto(report)) return report;
+  const uniqueReplacements = [...new Map(replacements.map((image) => [image.photo_url, image])).values()];
+  const replacementsByUrl = new Map(uniqueReplacements.map((image) => [image.photo_url, image]));
+  const usedPhotoUrls = new Set<string>();
 
-    const image = replacements[hashString(report.id) % replacements.length];
+  return reports.map((report, index) => {
+    const currentPhotoUrl = report.photo_url ?? "";
+    const existingReplacement = report.photo_url ? replacementsByUrl.get(report.photo_url) : null;
+    if (existingReplacement && !usedPhotoUrls.has(existingReplacement.photo_url)) {
+      usedPhotoUrls.add(existingReplacement.photo_url);
+      return addReportImageAttribution(report, existingReplacement);
+    }
+
+    if (!existingReplacement && currentPhotoUrl && !isLegacyReportPhoto(report) && !usedPhotoUrls.has(currentPhotoUrl)) {
+      usedPhotoUrls.add(currentPhotoUrl);
+      return report;
+    }
+
+    if (!existingReplacement && !isLegacyReportPhoto(report) && (!currentPhotoUrl || !usedPhotoUrls.has(currentPhotoUrl))) {
+      return report;
+    }
+
+    const image = pickUnusedReportImage(uniqueReplacements, usedPhotoUrls, `${report.id}:${index}`);
+    if (!image) return currentPhotoUrl ? clearDuplicateReportImage(report) : report;
+
+    usedPhotoUrls.add(image.photo_url);
     return addReportImageAttribution(report, image);
   });
 }
