@@ -21,7 +21,7 @@ export function generateBMCComplaint(input: {
     `Ward: #${input.wardNumber} — ${input.wardName}`,
     `Severity: ${severity}`,
     `Waste Type: ${category}`,
-    `GPS: ${input.lat}, ${input.lng}`,
+    `GPS: ${input.lat.toFixed(4)}, ${input.lng.toFixed(4)}`,
     input.photoUrl ? `Photo: ${input.photoUrl}` : null,
     "",
     "Please arrange immediate cleanup and prevent repeat dumping at this location.",
@@ -31,7 +31,7 @@ export function generateBMCComplaint(input: {
     .join("\n");
 }
 
-export function getReportShareText(report: GarbageReport, ward?: Ward, mla?: Representative, origin = location.origin) {
+export function getReportShareText(report: GarbageReport, ward?: Ward, mla?: Representative, origin = window.location.origin) {
   const url = `${origin}/report/${report.id}`;
   return `Garbage dump at ${report.address}, ${ward?.ward_name ?? "Bhubaneswar"} — ${daysActive(
     report.created_at

@@ -100,6 +100,16 @@ export const SPAM_KEY = "nk_report_times";
 export const UPVOTE_KEY = "nk_upvotes";
 export const FINGERPRINT_KEY = "nk_fp";
 export const LOCAL_REPORTS_KEY = "nk_local_reports";
+export const OUTSIDE_CITY_LOCALITY_PATTERNS = [
+  "bengaluru",
+  "bangalore",
+  "karnataka",
+  "hsr",
+  "koramangala",
+  "marathahalli",
+  "mahadevapura",
+  "banashankari"
+] as const;
 
 export const CHANGELOG = [
   {

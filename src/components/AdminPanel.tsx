@@ -343,13 +343,34 @@ function ModerationCard({
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [photoRevealed, setPhotoRevealed] = useState(false);
+  const [undoVisible, setUndoVisible] = useState(false);
+  const undoTimerRef = useRef<number | null>(null);
   const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
   const metadata = report.moderation_metadata ?? {};
   const reason = metadata.flag_reason || metadata.rejection_reason || "";
   const duplicate = reason === "potential_duplicate" && report._duplicate_original;
   const isNsfwPhoto = reason === "safesearch_failed";
 
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current != null) window.clearTimeout(undoTimerRef.current);
+    };
+  }, []);
+
   const run = async (decision: ModerationStatus) => {
+    if (decision === "rejected") {
+      setUndoVisible(true);
+      undoTimerRef.current = window.setTimeout(async () => {
+        setUndoVisible(false);
+        setBusy(true);
+        try {
+          await onAction(decision);
+        } finally {
+          setBusy(false);
+        }
+      }, 4000);
+      return;
+    }
     setBusy(true);
     try {
       await onAction(decision);
@@ -357,6 +378,14 @@ function ModerationCard({
       // Reset busy even if the parent handler rejects (error shown at panel level).
       setBusy(false);
     }
+  };
+
+  const undoReject = () => {
+    if (undoTimerRef.current != null) {
+      window.clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    setUndoVisible(false);
   };
 
   return (
@@ -416,17 +445,28 @@ function ModerationCard({
         </div>
       )}
       <div className="moderation-actions">
-        {currentTab !== "approved" && (
-          <button onClick={() => void run("approved")} disabled={busy}>
-            {busy ? <LoaderCircle className="spin" size={13} /> : <CircleCheck size={13} />}
-            {currentTab === "rejected" ? "Restore" : "Approve"}
-          </button>
-        )}
-        {currentTab !== "rejected" && (
-          <button onClick={() => void run("rejected")} disabled={busy} className="reject">
-            {busy ? <LoaderCircle className="spin" size={13} /> : <CircleX size={13} />}
-            Reject
-          </button>
+        {undoVisible ? (
+          <div className="reject-undo-row">
+            <span>Rejected</span>
+            <button className="undo-button" type="button" onClick={undoReject}>
+              Undo
+            </button>
+          </div>
+        ) : (
+          <>
+            {currentTab !== "approved" && (
+              <button onClick={() => void run("approved")} disabled={busy}>
+                {busy ? <LoaderCircle className="spin" size={13} /> : <CircleCheck size={13} />}
+                {currentTab === "rejected" ? "Restore" : "Approve"}
+              </button>
+            )}
+            {currentTab !== "rejected" && (
+              <button onClick={() => void run("rejected")} disabled={busy} className="reject">
+                {busy ? <LoaderCircle className="spin" size={13} /> : <CircleX size={13} />}
+                Reject
+              </button>
+            )}
+          </>
         )}
       </div>
     </article>

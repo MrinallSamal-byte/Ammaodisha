@@ -12,8 +12,22 @@ export function timeAgo(createdAt: string): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
+  if (days === 1) return "yesterday";
   if (days < 30) return `${days}d ago`;
   const months = Math.floor(days / 30);
   if (months < 12) return `${months}mo ago`;
   return `${Math.floor(months / 12)}y ago`;
+}
+
+/** Returns a short absolute date string like "Apr 5" or "Apr 5, 2024" for older dates. */
+export function shortDate(createdAt: string): string {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  const sameYear = date.getFullYear() === now.getFullYear();
+  return date.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: sameYear ? undefined : "numeric"
+  });
 }

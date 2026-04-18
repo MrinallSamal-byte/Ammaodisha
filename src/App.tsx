@@ -2,6 +2,11 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react
 import { backend } from "./services/backend";
 import type { CivicData } from "./types/domain";
 
+interface RouteHistoryState {
+  returnProfile?: { id: string; type: "ward" | "mla" | "mp" } | null;
+  returnReportId?: string;
+}
+
 const AdminPanel = lazy(async () => ({ default: (await import("./components/AdminPanel")).AdminPanel }));
 const PublicApp = lazy(async () => ({ default: (await import("./components/PublicApp")).PublicApp }));
 
@@ -26,6 +31,7 @@ export default function App() {
   const [data, setData] = useState<CivicData | null>(null);
   const [error, setError] = useState("");
   const [path, setPath] = useState(() => window.location.pathname);
+  const [routeState, setRouteState] = useState<RouteHistoryState>(() => (window.history.state ?? {}) as RouteHistoryState);
   const isAdmin = path === "/admin";
 
   // Skip the civic-data fetch entirely when on the admin route — the admin panel
@@ -39,17 +45,22 @@ export default function App() {
   }, [isAdmin]);
 
   useEffect(() => {
-    const onPop = () => setPath(window.location.pathname);
+    const onPop = () => {
+      setPath(window.location.pathname);
+      setRouteState((window.history.state ?? {}) as RouteHistoryState);
+    };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  const navigate = useCallback((nextPath: string) => {
-    window.history.pushState({}, "", nextPath);
+  const navigate = useCallback((nextPath: string, state: RouteHistoryState = {}) => {
+    window.history.pushState(state, "", nextPath);
     setPath(nextPath);
+    setRouteState(state);
   }, []);
 
   const routeSelection = useMemo(() => parseRoute(path), [path]);
+  const [autoOpenReport] = useState(() => new URLSearchParams(window.location.search).get("action") === "report");
 
   // Admin panel is independent — render before any civic-data guards.
   if (isAdmin) {
@@ -102,7 +113,14 @@ export default function App() {
         </main>
       }
     >
-      <PublicApp data={data} routeSelection={routeSelection} onDataChange={setData} navigate={navigate} />
+      <PublicApp
+        autoOpenReport={autoOpenReport}
+        data={data}
+        routeSelection={routeSelection}
+        routeState={routeState}
+        onDataChange={setData}
+        navigate={navigate}
+      />
     </Suspense>
   );
 }

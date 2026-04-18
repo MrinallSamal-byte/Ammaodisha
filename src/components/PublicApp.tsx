@@ -13,6 +13,7 @@ import {
   List,
   LoaderCircle,
   Map as MapIcon,
+  MapPin,
   MessageCircle,
   Phone,
   Plus,
@@ -23,12 +24,13 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Smartphone,
   ThumbsUp,
   Trophy,
   X
 } from "lucide-react";
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { BMC_CONTACTS, BMC_HELPLINE, BMC_NUMBER, CHANGELOG, CATEGORIES, SEVERITY, STATUS_LABELS } from "../services/constants";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { BMC_CONTACTS, BMC_HELPLINE, BMC_NUMBER, CHANGELOG, CATEGORIES, PARTY_COLORS, SEVERITY, STATUS_LABELS } from "../services/constants";
 import { backend } from "../services/backend";
 import { findNearestWard, findWardInGeoJson, isInsideBoundary } from "../services/geo";
 import { canSubmitReport, hasUpvoted } from "../services/limits";
@@ -48,6 +50,20 @@ const MapView = lazy(async () => ({ default: (await import("./MapView")).MapView
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const APP_VERSION = "0.3.0";
+const POPULAR_WARD_NUMBERS = [40, 30, 36, 37, 38, 41, 34, 19];
+const SEVERITY_SHORT_DESCRIPTIONS: Record<SeverityKey, string> = {
+  small: "Under 1m2",
+  medium: "About 1-5m2",
+  large: "Covers 5-20m2",
+  massive: "20m2+ or a full stretch"
+};
+const SEVERITY_FILTER_OPTIONS: { key: "all" | SeverityKey; label: string }[] = [
+  { key: "all", label: "All severity" },
+  { key: "small", label: "Minor (under 1m²)" },
+  { key: "medium", label: "Moderate (1-5m²)" },
+  { key: "large", label: "Serious (5-20m²)" },
+  { key: "massive", label: "Critical (20m²+)" }
+];
 
 type RouteSelection =
   | { type: "report"; id: string }
@@ -55,6 +71,7 @@ type RouteSelection =
   | { type: "mla"; id: string }
   | { type: "mp"; id: string }
   | null;
+type ProfileSelection = Extract<Exclude<RouteSelection, null>, { type: "ward" | "mla" | "mp" }>;
 
 interface ExternalPreviewConfig {
   confirmLabel: string;
@@ -64,10 +81,15 @@ interface ExternalPreviewConfig {
 }
 
 interface PublicAppProps {
+  autoOpenReport?: boolean;
   data: CivicData;
   routeSelection: RouteSelection;
+  routeState?: {
+    returnProfile?: { id: string; type: "ward" | "mla" | "mp" } | null;
+    returnReportId?: string;
+  } | null;
   onDataChange: (data: CivicData) => void;
-  navigate: (path: string) => void;
+  navigate: (path: string, state?: { returnProfile?: ProfileSelection | null; returnReportId?: string }) => void;
 }
 
 function getRouteSelectionPath(selection: Exclude<RouteSelection, null>) {
@@ -79,6 +101,11 @@ function getRouteSelectionLabel(selection: Exclude<RouteSelection, null>) {
   if (selection.type === "mla") return "MLA profile";
   if (selection.type === "mp") return "MP profile";
   return "Report";
+}
+
+function getStoredReturnProfile(value?: { id: string; type: string } | null): ProfileSelection | null {
+  if (!value || !["ward", "mla", "mp"].includes(value.type) || !value.id) return null;
+  return { type: value.type as "ward" | "mla" | "mp", id: value.id };
 }
 
 function normalizeWardText(value?: string | null) {
@@ -287,11 +314,11 @@ function DialogSurface({
   );
 }
 
-export function PublicApp({ data, routeSelection, onDataChange, navigate }: PublicAppProps) {
+export function PublicApp({ autoOpenReport = false, data, routeSelection, routeState, onDataChange, navigate }: PublicAppProps) {
   const [reports, setReports] = useState(data.reports);
   const [selectedReport, setSelectedReport] = useState<GarbageReport | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<RouteSelection>(null);
-  const [returnProfile, setReturnProfile] = useState<Exclude<RouteSelection, null> | null>(null);
+  const [returnProfile, setReturnProfile] = useState<ProfileSelection | null>(null);
   const [returnReport, setReturnReport] = useState<GarbageReport | null>(null);
   const [focusWardNumber, setFocusWardNumber] = useState<number | null>(null);
   const [focusRequestId, setFocusRequestId] = useState(0);
@@ -304,6 +331,11 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   const [showIntro, setShowIntro] = useState(() => readStorageValue("nk_intro_seen") !== "1");
   const [showAbout, setShowAbout] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
+  const [showMobileQR, setShowMobileQR] = useState(false);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(false);
+  const [showReportCoach, setShowReportCoach] = useState(() => readStorageValue("nk_report_coach_seen") !== "1");
+  const [filterPulse, setFilterPulse] = useState(false);
   const [viewMode, setViewMode] = useState<"map" | "list">("map");
   const [showFilters, setShowFilters] = useState(false);
   const [isOffline, setIsOffline] = useState(() => typeof navigator !== "undefined" && navigator.onLine === false);
@@ -317,6 +349,16 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   useEffect(() => {
     setReports(data.reports);
   }, [data.reports]);
+
+  useEffect(() => {
+    if (!autoOpenReport) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("action");
+    window.history.replaceState(window.history.state ?? {}, "", `${url.pathname}${url.search}${url.hash}`);
+    setShowIntro(false);
+    writeStorageValue("nk_intro_seen", "1");
+    setShowReportForm(true);
+  }, [autoOpenReport]);
 
   useEffect(() => {
     const syncOnlineState = () => setIsOffline(navigator.onLine === false);
@@ -335,6 +377,11 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   // prevent two modals rendering simultaneously when navigating between routes
   // (e.g. /report/abc → /ward/5 must close ReportDetail before opening ProfileSheet).
   useEffect(() => {
+    const storedReturnProfile = getStoredReturnProfile(routeState?.returnProfile ?? null);
+    const storedReturnReport = routeState?.returnReportId
+      ? reports.find((item) => item.id === routeState.returnReportId) ?? null
+      : null;
+
     if (!routeSelection) {
       setSelectedReport(null);
       setSelectedProfile(null);
@@ -346,11 +393,15 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
       const report = reports.find((item) => item.id === routeSelection.id);
       if (report) setSelectedReport(report);
       setSelectedProfile(null);
+      setReturnProfile(storedReturnProfile);
+      setReturnReport(null);
     } else {
       setSelectedProfile(routeSelection);
       setSelectedReport(null);
+      setReturnReport(storedReturnReport);
+      setReturnProfile(null);
     }
-  }, [reports, routeSelection]);
+  }, [reports, routeSelection, routeState]);
 
   const filteredReports = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -415,6 +466,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
     const nextReports = [report, ...reports];
     setReports(nextReports);
     onDataChange({ ...data, reports: nextReports });
+    setHasInteracted(true);
     setShowReportForm(false);
     setReturnProfile(null);
     setReturnReport(null);
@@ -425,6 +477,18 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   const dismissIntro = () => {
     writeStorageValue("nk_intro_seen", "1");
     setShowIntro(false);
+  };
+
+  const dismissReportCoach = () => {
+    writeStorageValue("nk_report_coach_seen", "1");
+    setShowReportCoach(false);
+  };
+
+  const applyFilters = () => {
+    setShowFilters(false);
+    if (!activeFilterCount) return;
+    setFilterPulse(true);
+    window.setTimeout(() => setFilterPulse(false), 900);
   };
 
   const focusWardOnMap = useCallback((wardNumber: number) => {
@@ -465,7 +529,6 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
     setStatusFilter("all");
     setWardFilterNumber(null);
     setSearchQuery("");
-    setSortBy("newest");
     setWardFilterState("idle");
   }, []);
 
@@ -510,7 +573,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
   );
 
   return (
-    <div className="app-frame civic-hidden">
+    <div className="app-frame">
       {viewMode === "map" && (
         <Suspense
           fallback={
@@ -527,6 +590,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
             onSelectWard={handleMapWardSelect}
             focusWardNumber={focusWardNumber}
             focusRequestId={focusRequestId}
+            onMapReady={() => setMapLoaded(true)}
           />
         </Suspense>
       )}
@@ -554,56 +618,82 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
       </header>
 
       <section className="control-dock" aria-label="Map and report controls">
-        <label className={clsx("quick-filter quick-filter-severity", severityFilter !== "all" && "is-active")}>
-          <span>Severity</span>
-          <select
-            value={severityFilter}
-            onChange={(event) => setSeverityFilter(event.target.value as "all" | SeverityKey)}
-            aria-label="Filter map by severity"
-          >
-            <option value="all">All Severity</option>
-            {Object.entries(SEVERITY).map(([key, value]) => (
-              <option value={key} key={key}>
-                {value.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className={clsx("quick-filter quick-filter-status", statusFilter !== "all" && "is-active")}>
-          <span>Status</span>
-          <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as "all" | "unresolved" | "resolved")}
-            aria-label="Filter map by status"
-          >
-            <option value="all">All Status</option>
-            <option value="unresolved">{STATUS_LABELS.unresolved}</option>
-            <option value="resolved">{STATUS_LABELS.resolved}</option>
-          </select>
-        </label>
-        <div className="map-mode-toggle">
-          <SegmentedButton active={viewMode === "map"} onClick={() => setViewMode("map")} icon={<MapIcon size={14} />} label="Map" />
-          <SegmentedButton active={viewMode === "list"} onClick={() => setViewMode("list")} icon={<List size={14} />} label="List" />
+        <div className="quick-filter-group" aria-label="Quick filters">
+          <label className="quick-select">
+            <span className="sr-only">Severity</span>
+            <select
+              name="severityFilter"
+              value={severityFilter}
+              onChange={(event) => setSeverityFilter(event.target.value as "all" | SeverityKey)}
+              aria-label="Filter by severity"
+            >
+              <option value="all">All Severity</option>
+              <option value="small">Minor</option>
+              <option value="medium">Moderate</option>
+              <option value="large">Serious</option>
+              <option value="massive">Critical</option>
+            </select>
+            <ChevronDown size={15} aria-hidden="true" />
+          </label>
+          <label className="quick-select">
+            <span className="sr-only">Status</span>
+            <select
+              name="statusFilter"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as "all" | "unresolved" | "resolved")}
+              aria-label="Filter by status"
+            >
+              <option value="all">All Status</option>
+              <option value="unresolved">Unresolved</option>
+              <option value="resolved">Resolved</option>
+            </select>
+            <ChevronDown size={15} aria-hidden="true" />
+          </label>
         </div>
-        <button
-          className={clsx("filter-button", activeFilterCount > 0 && "is-active")}
-          onClick={() => setShowFilters(true)}
-          type="button"
-          aria-label="Open search and filters"
-        >
-          <SlidersHorizontal size={14} />
-          Filter
-          {activeFilterCount > 0 && <span>{activeFilterCount}</span>}
-        </button>
-        <button
-          className={clsx("chip-button", wardFilterNumber != null && "is-active")}
-          onClick={detectAndFilterMyWard}
-          type="button"
-          aria-label="Filter reports near my current location"
-        >
-          {wardFilterState === "locating" ? <LoaderCircle className="spin" size={14} /> : <Layers size={14} />}
-          {wardFilterNumber != null ? `Ward ${wardFilterNumber}` : "Near Me"}
-        </button>
+        <div className="control-actions">
+          <div className="map-mode-toggle">
+            <SegmentedButton active={viewMode === "map"} onClick={() => setViewMode("map")} icon={<MapIcon size={14} />} label="Map" />
+            <SegmentedButton active={viewMode === "list"} onClick={() => setViewMode("list")} icon={<List size={14} />} label="List" />
+          </div>
+          <button
+            className={clsx("filter-button", activeFilterCount > 0 && "is-active", filterPulse && "is-pulsing")}
+            onClick={() => setShowFilters(true)}
+            type="button"
+            aria-label="Open search and filters"
+          >
+            <SlidersHorizontal size={14} />
+            Filter
+            {activeFilterCount > 0 && <span>{activeFilterCount}</span>}
+          </button>
+          {wardFilterNumber != null ? (
+            <span className="chip-button is-active near-me-active-chip">
+              <Layers size={14} />
+              Ward {wardFilterNumber}
+              <button
+                type="button"
+                className="near-me-clear"
+                aria-label={`Clear Ward ${wardFilterNumber} filter`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setWardFilterNumber(null);
+                  setWardFilterState("idle");
+                }}
+              >
+                <X size={11} />
+              </button>
+            </span>
+          ) : (
+            <button
+              className={clsx("chip-button", wardFilterState === "locating" && "is-active")}
+              onClick={detectAndFilterMyWard}
+              type="button"
+              aria-label="Filter reports near my current location"
+            >
+              {wardFilterState === "locating" ? <LoaderCircle className="spin" size={14} /> : <Layers size={14} />}
+              Near Me
+            </button>
+          )}
+        </div>
       </section>
 
       {(isOffline || wardFilterState === "error" || refreshError) && (
@@ -646,6 +736,8 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
           activeFilterCount={activeFilterCount}
           activeFilterSummary={activeFilterSummary}
           clearFilters={clearFilters}
+          detectAndFilterMyWard={detectAndFilterMyWard}
+          onApply={applyFilters}
           onClose={() => setShowFilters(false)}
           onRefresh={refreshReports}
           refreshing={refreshing}
@@ -658,6 +750,8 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
           sortBy={sortBy}
           statusFilter={statusFilter}
           visibleCount={visibleReports.length}
+          wardFilterNumber={wardFilterNumber}
+          wardFilterState={wardFilterState}
         />
       )}
 
@@ -693,6 +787,14 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
               <option value="upvotes">Sort: Most Upvoted</option>
               <option value="oldest">Sort: Oldest</option>
             </select>
+            <div className="list-stats-row" aria-label="Report statistics">
+              <span className="list-stat list-stat-red">
+                <strong>{unresolved.length}</strong> active
+              </span>
+              <span className="list-stat list-stat-green">
+                <strong>{resolved.length}</strong> resolved
+              </span>
+            </div>
           </div>
           <ReportList
             reports={visibleReports}
@@ -716,20 +818,52 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
       )}
 
       <footer className="bottom-action-bar safe-bottom">
-        <button className="primary-cta" onClick={() => setShowReportForm(true)}>
-          <Plus size={19} />
+        <button
+          className="desktop-handoff-cta"
+          type="button"
+          onClick={() => setShowMobileQR(true)}
+          aria-label="Scan QR to report from your phone"
+        >
+          <Smartphone size={17} />
+          Scan QR to Report
+        </button>
+        <button
+          className="mobile-report-cta"
+          type="button"
+          onClick={() => setShowReportForm(true)}
+          aria-label="Report a garbage dump"
+        >
+          <Camera size={17} />
           Report Garbage
         </button>
         <button className="insights-button" type="button" onClick={() => setShowInsights(true)} aria-label="Open Amma Odisha insights">
           <BarChart3 size={18} />
           <span>
-            <strong>Insights</strong>
-            <small>{visibleReports.length} visible</small>
+            <strong>{visibleReports.length}</strong>
+            <small>Insights</small>
           </span>
         </button>
       </footer>
 
-      {showIntro && !routeSelection && <IntroOverlay onClose={dismissIntro} />}
+      {showReportCoach && !showIntro && mapLoaded && !showReportForm && !selectedReport && !selectedProfile && !showInsights && !showMobileQR && (
+        <div className="report-coach-mark" role="status">
+          <span>Ready to report?</span>
+          <strong>Use the bottom button to add a garbage spot with photo proof.</strong>
+          <button type="button" onClick={dismissReportCoach} aria-label="Dismiss report tip">
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
+      {showIntro && !routeSelection && (viewMode !== "map" || mapLoaded) && (
+        <IntroOverlay
+          onClose={dismissIntro}
+          onStartReport={() => {
+            dismissIntro();
+            setShowReportForm(true);
+          }}
+        />
+      )}
       {showAbout && <AboutSheet onClose={() => setShowAbout(false)} onOpenChangelog={() => { setShowAbout(false); setShowChangelog(true); }} />}
       {showChangelog && <ChangelogSheet onClose={() => setShowChangelog(false)} />}
       {showInsights && (
@@ -749,14 +883,16 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
           }}
         />
       )}
-      {!showIntro && !showReportForm && !selectedReport && !selectedProfile && !showInsights && <TelegramToast />}
+      {showMobileQR && <MobileQRModal url={`${window.location.origin}/?action=report`} onClose={() => setShowMobileQR(false)} />}
+      {!showIntro && !showReportForm && !selectedReport && !selectedProfile && !showInsights && (
+        <TelegramToast trigger={hasInteracted} />
+      )}
       {showReportForm && <ReportForm data={data} onClose={() => setShowReportForm(false)} onSubmit={onSubmitted} />}
       {selectedReport && (
         <ReportDetail
           report={selectedReport}
           data={data}
           backLabel={returnProfile ? `Back to ${getRouteSelectionLabel(returnProfile)}` : "Back to map"}
-          breadcrumbLabel={returnProfile ? `${getRouteSelectionLabel(returnProfile)} · Report` : `Report · Ward ${selectedReport.ward_number}`}
           onBack={
             returnProfile
               ? () => {
@@ -764,7 +900,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
                   setReturnProfile(null);
                   setSelectedReport(null);
                   setSelectedProfile(profile);
-                  navigate(getRouteSelectionPath(profile));
+                  navigate(getRouteSelectionPath(profile), { returnProfile: null });
                 }
               : undefined
           }
@@ -775,12 +911,13 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
             navigate("/");
           }}
           onUpdate={updateReport}
+          onInteract={() => setHasInteracted(true)}
           openProfile={(profile) => {
             setReturnReport(selectedReport);
             setReturnProfile(null);
             setSelectedReport(null);
             setSelectedProfile(profile);
-            navigate(getRouteSelectionPath(profile));
+            navigate(getRouteSelectionPath(profile), { returnReportId: selectedReport.id });
           }}
         />
       )}
@@ -796,7 +933,7 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
                   setReturnReport(null);
                   setSelectedProfile(null);
                   setSelectedReport(report);
-                  navigate(`/report/${report.id}`);
+                  navigate(`/report/${report.id}`, { returnProfile: selectedProfile as ProfileSelection });
                 }
               : undefined
           }
@@ -807,11 +944,11 @@ export function PublicApp({ data, routeSelection, onDataChange, navigate }: Publ
             navigate("/");
           }}
           onSelectReport={(report) => {
-            setReturnProfile(selectedProfile);
+            setReturnProfile(selectedProfile as ProfileSelection);
             setReturnReport(null);
             setSelectedProfile(null);
             setSelectedReport(report);
-            navigate(`/report/${report.id}`);
+            navigate(`/report/${report.id}`, { returnProfile: selectedProfile as ProfileSelection });
           }}
         />
       )}
@@ -841,6 +978,8 @@ function FilterSheet({
   activeFilterCount,
   activeFilterSummary,
   clearFilters,
+  detectAndFilterMyWard,
+  onApply,
   onClose,
   onRefresh,
   refreshing,
@@ -852,11 +991,15 @@ function FilterSheet({
   severityFilter,
   sortBy,
   statusFilter,
-  visibleCount
+  visibleCount,
+  wardFilterNumber,
+  wardFilterState
 }: {
   activeFilterCount: number;
   activeFilterSummary: string[];
   clearFilters: () => void;
+  detectAndFilterMyWard: () => void;
+  onApply: () => void;
   onClose: () => void;
   onRefresh: () => void | Promise<void>;
   refreshing: boolean;
@@ -869,6 +1012,8 @@ function FilterSheet({
   sortBy: "newest" | "upvotes" | "oldest";
   statusFilter: "all" | "unresolved" | "resolved";
   visibleCount: number;
+  wardFilterNumber: number | null;
+  wardFilterState: "idle" | "locating" | "error";
 }) {
   return (
     <DialogSurface ariaLabel="Search and filter reports" className="filter-sheet" onClose={onClose}>
@@ -881,6 +1026,20 @@ function FilterSheet({
           <h2>Find reports faster</h2>
         </div>
         <SlidersHorizontal size={20} />
+      </div>
+      <div className="filter-location-row">
+        <button
+          type="button"
+          className="detect-ward-action"
+          onClick={() => {
+            onClose();
+            detectAndFilterMyWard();
+          }}
+          disabled={wardFilterState === "locating"}
+        >
+          {wardFilterState === "locating" ? <LoaderCircle className="spin" size={17} /> : <Layers size={17} />}
+          {wardFilterNumber != null ? `Showing Ward ${wardFilterNumber} - tap to change` : "Use my current location"}
+        </button>
       </div>
       <label className="filter-field">
         <span>Search</span>
@@ -899,10 +1058,9 @@ function FilterSheet({
         <label className="filter-field">
           <span>Severity</span>
           <select value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value as "all" | SeverityKey)} aria-label="Filter by severity">
-            <option value="all">All Severity</option>
-            {Object.entries(SEVERITY).map(([key, value]) => (
-              <option value={key} key={key}>
-                {value.label}
+            {SEVERITY_FILTER_OPTIONS.map((option) => (
+              <option value={option.key} key={option.key}>
+                {option.label}
               </option>
             ))}
           </select>
@@ -910,9 +1068,9 @@ function FilterSheet({
         <label className="filter-field">
           <span>Status</span>
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | "unresolved" | "resolved")} aria-label="Filter by status">
-            <option value="all">All Status</option>
-            <option value="unresolved">Unresolved</option>
-            <option value="resolved">Cleaned</option>
+            <option value="all">All status</option>
+            <option value="unresolved">Unresolved / Active</option>
+            <option value="resolved">Cleaned / Resolved</option>
           </select>
         </label>
         <label className="filter-field">
@@ -947,7 +1105,7 @@ function FilterSheet({
           {refreshing ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
           Refresh
         </button>
-        <button type="button" className="primary-cta" onClick={onClose}>
+        <button type="button" className="primary-cta" onClick={onApply}>
           Apply
         </button>
       </div>
@@ -1016,13 +1174,26 @@ function InsightsSheet({
             worstWards.slice(0, 6).map((item, index) => {
               const wardName = getDistinctWardName(item.ward);
               return (
-                <button className="ward-row" key={item.ward.ward_number} onClick={() => onOpenWard(item.ward.ward_number)}>
-                  <span className="rank">{index + 1}</span>
-                  <span>
+                <button
+                  className="ward-bar-row"
+                  key={item.ward.ward_number}
+                  onClick={() => onOpenWard(item.ward.ward_number)}
+                >
+                  <span className="ward-bar-rank">{index + 1}</span>
+                  <span className="ward-bar-info">
                     <strong>Ward {item.ward.ward_number}</strong>
-                    {wardName ? <small>{wardName}</small> : <small>Bhubaneswar</small>}
+                    <small>{wardName || "Bhubaneswar"}</small>
                   </span>
-                  <b>{item.count}</b>
+                  <span className="ward-bar-track">
+                    <span
+                      className="ward-bar-fill"
+                      style={{
+                        width: `${Math.round((item.count / Math.max(1, worstWards[0].count)) * 100)}%`
+                      }}
+                      aria-label={`${item.count} active reports`}
+                    />
+                    <b>{item.count}</b>
+                  </span>
                 </button>
               );
             })
@@ -1034,7 +1205,7 @@ function InsightsSheet({
   );
 }
 
-function IntroOverlay({ onClose }: { onClose: () => void }) {
+function IntroOverlay({ onClose, onStartReport }: { onClose: () => void; onStartReport: () => void }) {
   return (
     <DialogSurface layerClassName="intro-nudge" className="intro-card" ariaLabel="Amma Odisha intro" onClose={onClose}>
       <button className="toast-close" onClick={onClose} aria-label="Dismiss intro">
@@ -1046,10 +1217,14 @@ function IntroOverlay({ onClose }: { onClose: () => void }) {
       <p className="eyebrow">Bhubaneswar (BMC)</p>
       <h2>Report garbage. Hold your ward accountable.</h2>
       <p>Every garbage dump is mapped, photographed, and linked to the responsible ward, MLA, and MP.</p>
-      <small>Tap a red dot on the map to see a report, or start a new one.</small>
+      <p className="intro-action-copy">Tap a red dot on the map to see a report, or start a new one.</p>
       <b>67 wards · 4 MLAs · 1 MP · All of Bhubaneswar</b>
-      <button className="secondary-cta" onClick={onClose} aria-label="Start using map">
-        Start exploring the map
+      <button className="primary-cta intro-report-cta" onClick={onStartReport} aria-label="Report a garbage dump near you">
+        <Plus size={16} />
+        Report garbage near me
+      </button>
+      <button className="intro-explore-link" onClick={onClose} type="button">
+        Start using map
       </button>
       </div>
     </DialogSurface>
@@ -1187,8 +1362,13 @@ function ReportListItem({
   const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
   const wardName = getDistinctWardName(ward);
   const upvoteCount = report.upvote_count ?? 0;
+  const tagLabel = `${severity.label}, ${STATUS_LABELS[report.status]}${mla ? `, MLA: ${mla.name}` : ""}`;
   return (
-    <button className="report-item" onClick={() => onSelect(report)}>
+    <button
+      className="report-item"
+      onClick={() => onSelect(report)}
+      aria-label={`${wardName || report.address} — ${severity.label} garbage, ${STATUS_LABELS[report.status]}, ${upvoteCount} ${upvoteCount === 1 ? "upvote" : "upvotes"}`}
+    >
       <ReportPhoto
         src={report.photo_url}
         alt=""
@@ -1207,14 +1387,14 @@ function ReportListItem({
           {report.address}{wardName ? ` · Ward #${report.ward_number}` : ""} · {timeAgo(report.created_at)}
         </small>
       </span>
-      <span className="report-item-tags" aria-label={`${severity.label}, ${STATUS_LABELS[report.status]}`}>
+      <span className="report-item-tags" aria-label={tagLabel}>
         <em className={`severity-chip severity-${report.severity}`}>
           <SeverityMark severityKey={report.severity} />
           {severity.label}
         </em>
         {mla ? <small className="mla-label">{mla.name}</small> : <span className={clsx("status-chip", report.status === "resolved" ? "is-resolved" : "is-open")}>{STATUS_LABELS[report.status]}</span>}
       </span>
-      <ChevronDown size={14} className="sideways" />
+      <ChevronDown size={14} className="sideways" aria-hidden="true" />
     </button>
   );
 }
@@ -1250,8 +1430,9 @@ function ReportPhoto({
       );
     }
     return (
-      <span className="photo-placeholder" aria-hidden="true">
-        <Camera size={16} />
+      <span className="photo-placeholder" role="img" aria-label="No photo">
+        <Camera size={14} />
+        <span>No photo</span>
       </span>
     );
   }
@@ -1284,36 +1465,45 @@ function getWorstWards(reports: GarbageReport[], wards: Ward[]) {
 
 function ReportDetail({
   backLabel = "Back to map",
-  breadcrumbLabel,
   report,
   data,
   onBack,
   onClose,
+  onInteract,
   onUpdate,
   openProfile
 }: {
   backLabel?: string;
-  breadcrumbLabel?: string;
   report: GarbageReport;
   data: CivicData;
   onBack?: () => void;
   onClose: () => void;
+  onInteract?: () => void;
   onUpdate: (report: GarbageReport) => void;
-  openProfile: (selection: Exclude<RouteSelection, null>) => void;
+  openProfile: (selection: ProfileSelection) => void;
 }) {
   const [isUpvoting, setIsUpvoting] = useState(false);
   const [upvoted, setUpvoted] = useState(() => hasUpvoted(report.id));
   const [upvoteBump, setUpvoteBump] = useState(false);
+  const [alreadyVotedNote, setAlreadyVotedNote] = useState(false);
   const [showResolve, setShowResolve] = useState(false);
   const [compareValue, setCompareValue] = useState(50);
   const [externalPreview, setExternalPreview] = useState<ExternalPreviewConfig | null>(null);
   const compareRef = useRef<HTMLElement | null>(null);
+  const alreadyVotedTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     setUpvoted(hasUpvoted(report.id));
     setIsUpvoting(false);
     setUpvoteBump(false);
+    setAlreadyVotedNote(false);
   }, [report.id]);
+
+  useEffect(() => {
+    return () => {
+      if (alreadyVotedTimerRef.current != null) window.clearTimeout(alreadyVotedTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!upvoteBump) return;
@@ -1337,7 +1527,12 @@ function ReportDetail({
       if (!result.alreadyVoted && result.newCount != null) {
         setUpvoteBump(true);
         navigator.vibrate?.(20);
+        onInteract?.();
         onUpdate({ ...report, upvote_count: result.newCount });
+      } else if (result.alreadyVoted) {
+        setAlreadyVotedNote(true);
+        if (alreadyVotedTimerRef.current != null) window.clearTimeout(alreadyVotedTimerRef.current);
+        alreadyVotedTimerRef.current = window.setTimeout(() => setAlreadyVotedNote(false), 3500);
       }
     } catch (error) {
       console.error("Upvote failed", error);
@@ -1412,85 +1607,141 @@ function ReportDetail({
       className="detail-sheet"
       onClose={onClose}
       disableEscape={showResolve || Boolean(externalPreview)}
-      disableFocusTrap={showResolve || Boolean(externalPreview)}
     >
-        <button className="sheet-back-button" type="button" onClick={onBack ?? onClose}>
-          <ChevronLeft size={16} />
-          {backLabel}
-        </button>
-        <button className="close-button" onClick={onClose} aria-label="Close report detail">
-          <X size={18} />
-        </button>
-        <p className="sheet-breadcrumb">{breadcrumbLabel ?? `Report · Ward ${report.ward_number}`}</p>
-        <ReportPhoto
-          src={report.photo_url}
-          alt="Garbage report"
-          variant="detail"
-          width={report.photo_width}
-          height={report.photo_height}
-        />
-        {report.photo_source_url && (
-          <a className="photo-credit" href={report.photo_source_url} target="_blank" rel="noreferrer">
-            Image source: {report.photo_credit ?? "Wikimedia Commons"}
-            {report.photo_license ? ` - ${report.photo_license}` : ""}
-          </a>
-        )}
-        {canCompareResolvedPhotos && (
-          <button
-            className="cleanup-teaser-chip"
-            type="button"
-            onClick={() => compareRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-          >
-            <CheckCircle2 size={13} />
-            See cleanup photo
-            <ChevronDown size={13} />
-          </button>
-        )}
-        <div className="detail-content">
-          <div className="pill-row">
-            <span className="pill" style={{ background: `${severity.color}15`, color: severity.color }}>
-              <SeverityMark severityKey={report.severity} />
-              {severity.label}
-            </span>
-            <span className={clsx("pill", report.status === "resolved" ? "green" : "red")}>{STATUS_LABELS[report.status]}</span>
+        {/* ── Header: severity + status chips | share + close ── */}
+        <div className="detail-header">
+          <div className="detail-header-left">
+            {onBack && (
+              <button className="detail-back-btn" type="button" onClick={onBack} aria-label={backLabel}>
+                <ChevronLeft size={16} />
+              </button>
+            )}
+            <div className="detail-header-chips">
+              <span className="pill" style={{ background: `${severity.color}15`, color: severity.color }}>
+                <SeverityMark severityKey={report.severity} />
+                {severity.label}
+              </span>
+              <span className={clsx("pill", report.status === "resolved" ? "green" : "red")}>
+                {STATUS_LABELS[report.status]}
+              </span>
+            </div>
           </div>
-          <h2>{report.address}</h2>
-          <p>
-            Ward #{report.ward_number}
-            {wardName ? ` - ${wardName}` : ""} · {daysActive(report.created_at)} Days
-          </p>
+          <div className="detail-header-actions">
+            <button className="detail-icon-btn" onClick={() => void shareReport()} aria-label="Share report">
+              <Share2 size={17} />
+            </button>
+            <button className="detail-icon-btn" onClick={onClose} aria-label="Close report detail">
+              <X size={17} />
+            </button>
+          </div>
+        </div>
 
-          <div className="metric-grid">
-            <Metric label="Upvotes" value={report.upvote_count || 1} />
-            <Metric label="Waste Type" value={CATEGORIES[report.category]} />
-            <Metric label="Age" value={`${daysActive(report.created_at)} days`} />
+        {/* ── Title + location ── */}
+        <div className="detail-title-area">
+          <h2>{ward?.locality_name?.trim() || getDistinctWardName(ward) || `Ward ${report.ward_number}`}</h2>
+          <p className="detail-location">
+            <MapPin size={13} />
+            {report.address}
+          </p>
+        </div>
+
+        {/* ── Photo with I've-seen-this overlay ── */}
+        <div className="detail-photo-wrap">
+          <ReportPhoto
+            src={report.photo_url}
+            alt="Garbage report"
+            variant="detail"
+            width={report.photo_width}
+            height={report.photo_height}
+          />
+          {report.photo_source_url && (
+            <a className="photo-credit detail-photo-credit" href={report.photo_source_url} target="_blank" rel="noreferrer">
+              Image source: {report.photo_credit ?? "Wikimedia Commons"}
+              {report.photo_license ? ` - ${report.photo_license}` : ""}
+            </a>
+          )}
+          <button
+            className={clsx("detail-upvote-overlay", upvoted && "is-upvoted", upvoteBump && "is-bumped")}
+            onClick={() => void upvote()}
+            disabled={upvoted || isUpvoting}
+            aria-label={upvoted ? "Already upvoted" : "Upvote this report"}
+          >
+            {isUpvoting ? <LoaderCircle className="spin" size={14} /> : <ThumbsUp size={14} />}
+            {upvoted ? "Seen!" : "I've seen this"}
+          </button>
+        </div>
+
+        {/* ── Stats strip ── */}
+        <div className="detail-stats-row">
+          <div className="detail-stat">
+            <strong style={{ color: severity.color }}>{report.upvote_count || 1}</strong>
+            <span>Reports</span>
           </div>
+          <div className="detail-stat-divider" aria-hidden="true" />
+          <div className="detail-stat">
+            <strong style={{ color: "#f97316" }}>{daysActive(report.created_at)}</strong>
+            <span>Days</span>
+          </div>
+          <div className="detail-stat-divider" aria-hidden="true" />
+          <div className="detail-stat detail-stat-text">
+            <strong style={{ color: "var(--blue)" }}>{CATEGORIES[report.category]}</strong>
+            <span>Waste Type</span>
+          </div>
+        </div>
+
+        {/* ── Body content ── */}
+        <div className="detail-content">
+          {alreadyVotedNote && (
+            <p className="already-voted-note" role="status">
+              You already supported this report from another device.
+            </p>
+          )}
+          {report.moderation_status === "flagged" && (
+            <div className="notice info pending-review-notice" role="status">
+              <ShieldCheck size={16} />
+              <span>
+                <strong>Pending review</strong>
+                Visible to you now. It becomes public once the photo is approved.
+              </span>
+            </div>
+          )}
 
           {canCompareResolvedPhotos && (
-            <section ref={compareRef} className="resolved-compare" aria-label="Before and after cleanup photos">
-              <div className="sheet-title-row compact">
-                <h3>Before and after</h3>
-                <span className="pill green">Cleaned</span>
-              </div>
-              <div className="photo-compare">
-                <img src={report.photo_url ?? ""} alt="Before cleanup" />
-                <div className="photo-compare-after" style={{ clipPath: `inset(0 ${100 - compareValue}% 0 0)` }}>
-                  <img src={report.resolved_photo_url ?? ""} alt="After cleanup" />
+            <>
+              <button
+                className="cleanup-teaser-chip"
+                type="button"
+                onClick={() => compareRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              >
+                <CheckCircle2 size={13} />
+                See cleanup photo
+                <ChevronDown size={13} />
+              </button>
+              <section ref={compareRef} className="resolved-compare" aria-label="Before and after cleanup photos">
+                <div className="sheet-title-row compact">
+                  <h3>Before and after</h3>
+                  <span className="pill green">Cleaned</span>
                 </div>
-                <span className="compare-label before">Before</span>
-                <span className="compare-label after">After</span>
-              </div>
-              <label className="compare-slider">
-                <span>Slide to compare</span>
-                <input
-                  type="range"
-                  min="15"
-                  max="85"
-                  value={compareValue}
-                  onChange={(event) => setCompareValue(Number(event.target.value))}
-                />
-              </label>
-            </section>
+                <div className="photo-compare">
+                  <img src={report.photo_url ?? ""} alt="Before cleanup" />
+                  <div className="photo-compare-after" style={{ clipPath: `inset(0 ${100 - compareValue}% 0 0)` }}>
+                    <img src={report.resolved_photo_url ?? ""} alt="After cleanup" />
+                  </div>
+                  <span className="compare-label before">Before</span>
+                  <span className="compare-label after">After</span>
+                </div>
+                <label className="compare-slider">
+                  <span>Slide to compare</span>
+                  <input
+                    type="range"
+                    min="15"
+                    max="85"
+                    value={compareValue}
+                    onChange={(event) => setCompareValue(Number(event.target.value))}
+                  />
+                </label>
+              </section>
+            </>
           )}
 
           <h3>Accountability</h3>
@@ -1500,16 +1751,6 @@ function ReportDetail({
           </div>
 
           <div className="detail-actions">
-            <div className="primary-action-row">
-              <button className={clsx("primary-detail-action", upvoted && "is-upvoted", upvoteBump && "is-bumped")} onClick={() => void upvote()} disabled={upvoted || isUpvoting}>
-                {isUpvoting ? <LoaderCircle className="spin" size={16} /> : <ThumbsUp size={16} />}
-                {upvoted ? "Upvoted" : "Upvote"}
-              </button>
-              <button className="primary-detail-action" onClick={() => void shareReport()}>
-                <Share2 size={16} />
-                Share
-              </button>
-            </div>
             <button className="directions-link" onClick={prepareDirections}>
               <ArrowUpRight size={15} />
               Get directions
@@ -1609,6 +1850,11 @@ function RepCard({ label, rep, area, onClick }: { label: string; rep?: Represent
   );
 }
 
+function getPartyColor(party?: string): string {
+  if (!party) return "var(--text-faint)";
+  return PARTY_COLORS[party.toUpperCase()] ?? "var(--text-faint)";
+}
+
 function Avatar({ rep }: { rep?: Representative }) {
   if (rep?.photo_url) return <img className="avatar" src={rep.photo_url} alt={rep.name} />;
   const initials = (rep?.name ?? "NK")
@@ -1627,6 +1873,7 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
   const [preview, setPreview] = useState<string | null>(null);
   const [status, setStatus] = useState<ResolveStatus>("locating");
   const [verifiedPosition, setVerifiedPosition] = useState<{ lat: number; lng: number; distanceMeters: number } | null>(null);
+  const [failedDistance, setFailedDistance] = useState<number | null>(null);
   const [saveError, setSaveError] = useState("");
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
@@ -1654,6 +1901,7 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
         const distanceMeters = Math.hypot((lat - report.latitude) * 111_000, (lng - report.longitude) * 111_000);
+        setFailedDistance(distanceMeters);
         if (distanceMeters > 500) {
           setStatus("mismatch");
           return;
@@ -1727,14 +1975,25 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
             </strong>
             {status === "verified"
               ? `Distance confirmed at about ${Math.max(1, Math.round(verifiedPosition?.distanceMeters ?? 0))}m.`
-              : "You must be within 500m before uploading the cleaned photo."}
+              : status === "mismatch" && failedDistance != null
+                ? `You appear to be about ${Math.round(failedDistance)}m away. Move closer to the spot (within 500m) and try again.`
+                : "You must be within 500m before uploading the cleaned photo."}
           </span>
         </div>
-        <label className={clsx("photo-drop", preview && "has-photo", status !== "verified" && "is-disabled")}>
+        <label
+          className={clsx("photo-drop", preview && "has-photo", status !== "verified" && "is-disabled")}
+          aria-disabled={status !== "verified" ? "true" : undefined}
+        >
           {preview ? <img src={preview} alt="" /> : <Camera size={28} />}
           <span>{preview ? "Change cleanup photo" : "Add cleanup photo"}</span>
           <small>Take a new photo or choose from your gallery.</small>
-          <input type="file" accept="image/*" disabled={status !== "verified"} onChange={(event) => onFile(event.target.files?.[0])} />
+          <input
+            type="file"
+            accept="image/*"
+            aria-label="Upload cleanup proof photo"
+            disabled={status !== "verified"}
+            onChange={(event) => onFile(event.target.files?.[0])}
+          />
         </label>
         {status === "saving" && uploadProgress != null && (
           <div className="upload-progress-panel" role="status">
@@ -1757,6 +2016,25 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
           <button className="secondary-cta" type="button" onClick={checkProximity}>
             Check distance again
           </button>
+        )}
+        {status === "mismatch" && (
+          <div className="resolve-fallback">
+            <p>Can't get close enough? You can still submit a cleanup photo without GPS verification. It will be flagged for manual review.</p>
+            <button
+              className="secondary-cta"
+              type="button"
+              onClick={() => {
+                setVerifiedPosition({
+                  lat: report.latitude,
+                  lng: report.longitude,
+                  distanceMeters: failedDistance ?? 999
+                });
+                setStatus("verified");
+              }}
+            >
+              Submit with photo only (unverified)
+            </button>
+          </div>
         )}
         {status === "mismatch" && (
           <p className="warning-text" role="alert">We could not verify that you are within 500m of this report. Move closer to the spot and try again.</p>
@@ -1783,6 +2061,8 @@ function ExternalAppPreview({
   onConfirm: () => void;
   title: string;
 }) {
+  const isWhatsAppPreview = confirmLabel === "Open WhatsApp";
+
   return (
     <DialogSurface layerClassName="nested-modal" className="mini-card external-preview" ariaLabel={title} onClose={onClose}>
       <button className="sheet-back-button" type="button" onClick={onClose}>
@@ -1794,7 +2074,24 @@ function ExternalAppPreview({
       </button>
       <h2>{title}</h2>
       <p>{helper}</p>
-      <pre>{details}</pre>
+      {isWhatsAppPreview ? (
+        <div className="whatsapp-bubble-preview">
+          <div className="whatsapp-bubble-header">
+            <span className="whatsapp-sender-dot" aria-hidden="true" />
+            <span className="whatsapp-sender-name">Amma Odisha -&gt; BMC</span>
+          </div>
+          <div className="whatsapp-bubble-body">
+            {details.split("\n").map((line, index) => (
+              line.trim() ? <p key={index}>{line}</p> : <br key={index} />
+            ))}
+          </div>
+          <p className="whatsapp-bubble-hint">
+            You can review and edit this message in WhatsApp before sending.
+          </p>
+        </div>
+      ) : (
+        <pre>{details}</pre>
+      )}
       <div className="preview-actions">
         <button className="secondary-cta" type="button" onClick={onClose}>
           Not now
@@ -1833,6 +2130,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
   const [wardNumber, setWardNumber] = useState("");
   const [wardSearch, setWardSearch] = useState("");
   const [wardPickerOpen, setWardPickerOpen] = useState(false);
+  const [activeWardIndex, setActiveWardIndex] = useState(-1);
   const [detectedWard, setDetectedWard] = useState<Ward | null>(null);
   const [location, setLocation] = useState<{ lat: number; lng: number; accuracy: number | null; recordedAt: string } | null>(null);
   const [locationState, setLocationState] = useState<"idle" | "locating" | "detecting" | "detected" | "manual" | "outside" | "unavailable" | "denied">("idle");
@@ -1847,6 +2145,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
   const [slowSubmit, setSlowSubmit] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [submittedReviewStatus, setSubmittedReviewStatus] = useState<GarbageReport["moderation_status"] | null>(null);
+  const [submittedReport, setSubmittedReport] = useState<GarbageReport | null>(null);
   const [formError, setFormError] = useState("");
   const [liveMessage, setLiveMessage] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<ReportFieldKey, string>>>({});
@@ -1855,11 +2154,23 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
   const limit = canSubmitReport();
   const selectedWard = detectedWard ?? data.wards.find((ward) => ward.ward_number === Number(wardNumber));
   const selectedWardLabel = selectedWard ? getWardSelectLabel(selectedWard) : "";
+  const starterWardOptions = useMemo(() => {
+    const wardsByNumber = new Map(data.wards.map((ward) => [ward.ward_number, ward]));
+    const starters = POPULAR_WARD_NUMBERS.map((wardNumber) => wardsByNumber.get(wardNumber)).filter((ward): ward is Ward => Boolean(ward));
+    const starterNumbers = new Set(starters.map((ward) => ward.ward_number));
+    return [...starters, ...data.wards.filter((ward) => !starterNumbers.has(ward.ward_number))];
+  }, [data.wards]);
   const filteredWardOptions = useMemo(() => {
     const query = wardSearch.trim().toLowerCase();
     const digits = query.replace(/\D/g, "");
-    if (!query || (selectedWard && query === getWardSelectLabel(selectedWard).toLowerCase())) {
-      return data.wards;
+    if (!query) {
+      if (selectedWard) {
+        return [selectedWard, ...starterWardOptions.filter((ward) => ward.ward_number !== selectedWard.ward_number)];
+      }
+      return starterWardOptions;
+    }
+    if (selectedWard && query === getWardSelectLabel(selectedWard).toLowerCase()) {
+      return [selectedWard, ...starterWardOptions.filter((ward) => ward.ward_number !== selectedWard.ward_number)];
     }
     const matches = query
       ? data.wards.filter((ward) => getWardSearchText(ward).includes(query) || (digits ? String(ward.ward_number).includes(digits) : false))
@@ -1869,11 +2180,11 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
       return [selectedWard, ...matches];
     }
     return matches;
-  }, [data.wards, selectedWard, wardSearch]);
+  }, [data.wards, selectedWard, starterWardOptions, wardSearch]);
   const visibleWardOptions = filteredWardOptions.slice(0, 8);
   const progressLabel =
     formStep === 1
-      ? "Choose ward"
+      ? "Choose area"
       : formStep === 2
         ? "Add evidence"
         : "Review and submit";
@@ -1889,13 +2200,35 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
   // Track the current object URL so we can revoke it when the user picks a
   // new photo (preventing Blob URL memory leaks on repeated retakes).
   const photoPreviewRef = useRef<string | null>(null);
-  const submitTimeoutRef = useRef<number | null>(null);
+  const wardSearchRef = useRef<HTMLInputElement | null>(null);
+  const successRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     return () => {
       if (photoPreviewRef.current) URL.revokeObjectURL(photoPreviewRef.current);
-      if (submitTimeoutRef.current != null) window.clearTimeout(submitTimeoutRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!wardPickerOpen) {
+      setActiveWardIndex(-1);
+      return;
+    }
+    setActiveWardIndex((index) => {
+      if (!visibleWardOptions.length) return -1;
+      if (index < 0) return 0;
+      return Math.min(index, visibleWardOptions.length - 1);
+    });
+  }, [visibleWardOptions.length, wardPickerOpen]);
+
+  useEffect(() => {
+    const activeWard = activeWardIndex >= 0 ? visibleWardOptions[activeWardIndex] : undefined;
+    if (!activeWard) return;
+    document.getElementById(`report-ward-option-${activeWard.ward_number}`)?.scrollIntoView({ block: "nearest" });
+  }, [activeWardIndex, visibleWardOptions]);
+
+  useEffect(() => {
+    if (submitSuccess) successRef.current?.focus({ preventScroll: true });
+  }, [submitSuccess]);
 
   useEffect(() => {
     const syncOnlineState = () => setFormOffline(navigator.onLine === false);
@@ -1906,6 +2239,38 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
       window.removeEventListener("offline", syncOnlineState);
     };
   }, []);
+
+  const guideToWardSearch = useCallback(() => {
+    window.setTimeout(() => wardSearchRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 200);
+    window.setTimeout(() => wardSearchRef.current?.focus({ preventScroll: true }), 350);
+  }, []);
+
+  const openSubmittedReport = useCallback(
+    (report?: GarbageReport | null) => {
+      const nextReport = report ?? submittedReport;
+      if (!nextReport) return;
+      onSubmit(nextReport);
+    },
+    [onSubmit, submittedReport]
+  );
+
+  const shareSubmittedReport = useCallback(async () => {
+    const url = submittedReport ? `${window.location.origin}/report/${submittedReport.id}` : window.location.origin;
+    const wardLabel = selectedWard ? getWardSelectLabel(selectedWard) : "Bhubaneswar";
+    const text = submittedReport
+      ? `I just reported a garbage dump in ${wardLabel} on Amma Odisha. Support this report: ${url}`
+      : `I just reported a garbage dump in Bhubaneswar on Amma Odisha. Join me in holding our ward accountable: ${url}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "Amma Odisha", text, url });
+      } else {
+        await navigator.clipboard?.writeText(text);
+      }
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      console.error("Share failed", caught);
+    }
+  }, [selectedWard, submittedReport]);
 
   const requestClose = useCallback(() => {
     if (submitting) return;
@@ -1935,16 +2300,44 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
     setWardNumber(String(ward.ward_number));
     setWardSearch(getWardSelectLabel(ward));
     setWardPickerOpen(false);
+    setActiveWardIndex(-1);
     setLocationState("manual");
     clearFieldError("ward");
     setFormError("");
   };
 
+  const onWardSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setWardPickerOpen(true);
+      setActiveWardIndex((index) => {
+        if (!visibleWardOptions.length) return -1;
+        return Math.min(index < 0 ? 0 : index + 1, visibleWardOptions.length - 1);
+      });
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setWardPickerOpen(true);
+      setActiveWardIndex((index) => {
+        if (!visibleWardOptions.length) return -1;
+        return Math.max(index < 0 ? visibleWardOptions.length - 1 : index - 1, 0);
+      });
+    } else if (event.key === "Enter") {
+      const activeWard = visibleWardOptions[activeWardIndex >= 0 ? activeWardIndex : 0];
+      if (activeWard) {
+        event.preventDefault();
+        chooseWard(activeWard);
+      }
+    } else if (event.key === "Escape") {
+      setWardPickerOpen(false);
+      setActiveWardIndex(-1);
+    }
+  };
+
   const validateStep = useCallback(
     (step: ReportFormStep) => {
       const nextFieldErrors: Partial<Record<ReportFieldKey, string>> = {};
-      if (step === 1 && !selectedWard) {
-        nextFieldErrors.ward = "Search for your ward and tap a result to continue.";
+    if (step === 1 && !selectedWard) {
+        nextFieldErrors.ward = "Search for your area and tap a result to continue.";
       }
       if (step === 2) {
         if (!photo) nextFieldErrors.photo = "Add a clear photo of the garbage spot.";
@@ -1987,6 +2380,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
   const detectWard = () => {
     if (!navigator.geolocation) {
       setLocationState("unavailable");
+      guideToWardSearch();
       return;
     }
     setLocationState("locating");
@@ -1998,6 +2392,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
         setLocation({ lat, lng, accuracy, recordedAt: new Date(position.timestamp || Date.now()).toISOString() });
         if (!isInsideBoundary(lat, lng, data.cityBoundary)) {
           setLocationState("outside");
+          guideToWardSearch();
           return;
         }
         setLocationState("detecting");
@@ -2011,9 +2406,13 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
           clearFieldError("ward");
         } else {
           setLocationState("manual");
+          guideToWardSearch();
         }
       },
-      (geoError) => setLocationState(geoError.code === geoError.PERMISSION_DENIED ? "denied" : "manual"),
+      (geoError) => {
+        setLocationState(geoError.code === geoError.PERMISSION_DENIED ? "denied" : "manual");
+        guideToWardSearch();
+      },
       { enableHighAccuracy: true, timeout: 8000 }
     );
   };
@@ -2036,22 +2435,21 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
   };
 
   const locationHelp = (() => {
-    if (locationState === "locating") return "Your browser will ask for permission. We only use it to detect the ward for this report.";
-    if (locationState === "detecting") return "Finding the matching Bhubaneswar ward...";
+    if (locationState === "locating") return "Your browser may ask for permission - we only use it for this report.";
+    if (locationState === "detecting") return "Matching your coordinates to the local ward boundary...";
     if (locationState === "detected") return `Detected Ward ${selectedWard?.ward_number ?? ""}. You can still change it manually.`;
-    if (locationState === "outside") return "Your location appears outside Bhubaneswar. Choose the ward manually if this report is inside the city.";
-    if (locationState === "denied") return "Location permission was not allowed. Choose the ward manually to continue.";
-    if (locationState === "unavailable") return "This browser cannot share location. Choose the ward manually to continue.";
-    if (locationState === "manual" && selectedWard) return "Ward selected manually. The report will use the ward center if GPS is not added.";
-    if (locationState === "manual") return "We could not detect your ward. Choose it manually to continue.";
-    return "Most people do not know their ward number. Detect it automatically, or search manually below.";
+    if (locationState === "outside") return "Your location appears to be outside Bhubaneswar. Search manually below.";
+    if (locationState === "denied") return "Location access was denied. Type a nearby market or colony name below.";
+    if (locationState === "unavailable") return "Location not available in this browser. Choose your area manually.";
+    if (locationState === "manual" && selectedWard) return "Area selected manually.";
+    if (locationState === "manual") return "We couldn't detect your area. Please search below.";
+    return "We'll find your neighbourhood and match it to the right area.";
   })();
+  const needsWardSearchGuidance = ["denied", "outside", "unavailable", "manual"].includes(locationState) && !selectedWard;
 
   const submitProgressText =
     submitStage === "uploading"
-      ? uploadProgress == null
-        ? "Uploading photo..."
-        : `Uploading photo (${Math.round(uploadProgress)}%)`
+      ? "Uploading photo..."
       : submitStage === "saving"
         ? "Saving report..."
         : "Submitting...";
@@ -2103,9 +2501,9 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
       setSubmitStage("saving");
       const submitted = await backend.submitReport(input);
       setSubmittedReviewStatus(submitted.moderation_status ?? "flagged");
+      setSubmittedReport(submitted);
       setSubmitSuccess(true);
       navigator.vibrate?.(35);
-      submitTimeoutRef.current = window.setTimeout(() => onSubmit(submitted), 1800);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Unable to submit report. Please try again.";
       setFormError(message);
@@ -2136,7 +2534,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
           <h2>Report Garbage</h2>
           <p>
             <strong>{currentStepTitle}</strong>{" "}
-            {formStep === 1 && "Pick the ward for this report."}
+            {formStep === 1 && "Pick the area for this report."}
             {formStep === 2 && "Add the proof people need to find the spot."}
             {formStep === 3 && "Confirm the details before submitting."}
           </p>
@@ -2146,15 +2544,42 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
         {liveMessage}
       </div>
       {submitSuccess && (
-        <div className="submit-success-screen" role="status">
+        <div
+          ref={successRef}
+          className="submit-success-screen"
+          role="status"
+          tabIndex={0}
+          aria-label="Report submitted."
+        >
           <CheckCircle2 size={36} />
           <p className="eyebrow">Report Submitted</p>
           <h3>Thanks for reporting this spot.</h3>
           <p>
             {submittedReviewStatus === "approved"
-              ? "Opening your report now."
-              : "Submitted for review. It may take a moment before appearing publicly."}
+              ? "Your report is live on the map now."
+              : "We review every photo before it appears publicly - usually within a few minutes."}
           </p>
+          <button
+            className="primary-cta submit-open-button"
+            type="button"
+            onClick={() => openSubmittedReport()}
+          >
+            <ArrowUpRight size={14} />
+            View my report
+          </button>
+          {submittedReviewStatus !== null && (
+            <button
+              className="secondary-cta submit-share-button"
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                void shareSubmittedReport();
+              }}
+            >
+              <Share2 size={15} />
+              Share your report
+            </button>
+          )}
         </div>
       )}
       <div className="form-progress" aria-label={`Report progress step ${formStep} of 3`}>
@@ -2183,21 +2608,27 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
             <button className="detect-ward-action" onClick={detectWard} type="button" disabled={locationState === "locating" || locationState === "detecting"}>
               {locationState === "locating" || locationState === "detecting" ? <LoaderCircle className="spin" size={17} /> : <RefreshCw size={17} />}
               {locationState === "detected"
-                ? "Refresh My Ward"
+                ? "Refresh location"
                 : locationState === "detecting"
-                  ? "Detecting Ward..."
+                  ? "Detecting your area..."
                   : locationState === "locating"
-                    ? "Finding You..."
-                    : "Detect My Ward"}
+                    ? "Finding your location..."
+                    : "Use my current location"}
             </button>
             <span>
-              <strong>Fastest path</strong>
+              <strong>Fastest - works automatically</strong>
               <small>{locationHelp}</small>
             </span>
           </div>
+          {needsWardSearchGuidance && (
+            <div className="ward-recovery-callout" role="status">
+              <strong>Can't detect your area?</strong>
+              <span>Type the name of a nearby market, colony, or landmark - for example Unit 4, Sahid Nagar, or Nayapalli.</span>
+            </div>
+          )}
           <div className="field">
             <label className="field-label" htmlFor="report-ward-search" id="report-step-ward">
-              Search ward manually <b>*</b>
+              Or search by name <b>*</b>
             </label>
             <div
               className="ward-combobox"
@@ -2210,6 +2641,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
               <div className="ward-search">
                 <Search size={14} />
                 <input
+                  ref={wardSearchRef}
                   id="report-ward-search"
                   value={wardSearch}
                   onFocus={() => setWardPickerOpen(true)}
@@ -2217,34 +2649,50 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
                     const nextValue = event.target.value;
                     setWardSearch(nextValue);
                     setWardPickerOpen(true);
+                    setActiveWardIndex(0);
                     if (selectedWard && nextValue !== selectedWardLabel) {
                       setWardNumber("");
                       setDetectedWard(null);
                     }
                     clearFieldError("ward");
                   }}
-                  placeholder="Type ward number or locality"
+                  onKeyDown={onWardSearchKeyDown}
+                  placeholder="Neighbourhood, market, colony, or ward number"
                   role="combobox"
                   aria-autocomplete="list"
                   aria-expanded={wardPickerOpen}
                   aria-controls="report-ward-options"
+                  aria-activedescendant={
+                    wardPickerOpen && activeWardIndex >= 0 && visibleWardOptions[activeWardIndex]
+                      ? `report-ward-option-${visibleWardOptions[activeWardIndex].ward_number}`
+                      : undefined
+                  }
                   aria-invalid={Boolean(fieldErrors.ward)}
                   aria-describedby={fieldErrors.ward ? "report-ward-error" : selectedWard ? "selected-ward" : undefined}
                 />
               </div>
               {wardPickerOpen && (
                 <div className="ward-options" id="report-ward-options" role="listbox" aria-label="Matching wards">
+                  {wardSearch.trim() === "" && !selectedWard && (
+                    <p className="ward-options-hint">
+                      Type a nearby market, colony, or ward number to search.
+                    </p>
+                  )}
                   {visibleWardOptions.length ? (
-                    visibleWardOptions.map((ward) => {
+                    visibleWardOptions.map((ward, index) => {
                       const wardLabel = getWardSelectLabel(ward);
                       const isSelected = selectedWard?.ward_number === ward.ward_number;
+                      const isActive = activeWardIndex === index;
                       return (
                         <button
+                          id={`report-ward-option-${ward.ward_number}`}
                           key={ward.ward_number}
                           type="button"
                           role="option"
-                          aria-selected={isSelected}
-                          className={clsx(isSelected && "is-selected")}
+                          aria-selected={isSelected || isActive}
+                          className={clsx(isSelected && "is-selected", isActive && "is-active")}
+                          onMouseEnter={() => setActiveWardIndex(index)}
+                          onPointerDown={(event) => event.preventDefault()}
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => chooseWard(ward)}
                         >
@@ -2254,7 +2702,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
                       );
                     })
                   ) : (
-                    <p>No matching wards. Try a ward number or locality.</p>
+                    <p>No matching areas. Try a ward number or locality.</p>
                   )}
                 </div>
               )}
@@ -2262,16 +2710,16 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
             {selectedWard && (
               <p className="selected-ward" id="selected-ward" role="status">
                 <CheckCircle2 size={14} />
-                Selected {selectedWardLabel}
+                Found: {selectedWardLabel}
               </p>
             )}
             {fieldErrors.ward && (
-              <p className="field-error" id="report-ward-error" role="alert">
+              <p className="field-error" id="report-ward-error">
                 {fieldErrors.ward}
               </p>
             )}
           </div>
-          <p className="privacy-note">Your GPS coordinates are used only to identify the ward and are not shared publicly. Manual search still works if location is unavailable.</p>
+          <p className="privacy-note">Your GPS coordinates are used only to identify the right area and are not shared publicly. Manual search still works if location is unavailable.</p>
         </section>
       )}
 
@@ -2293,7 +2741,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
             />
             <small>Please add a landmark or address so others can find this spot.</small>
             {fieldErrors.address && (
-              <p className="field-error" id="report-address-error" role="alert">
+              <p className="field-error" id="report-address-error">
                 {fieldErrors.address}
               </p>
             )}
@@ -2309,6 +2757,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
               <input
                 type="file"
                 accept="image/*"
+                aria-label="Upload garbage photo"
                 aria-invalid={Boolean(fieldErrors.photo)}
                 aria-describedby={fieldErrors.photo ? "report-photo-error" : undefined}
                 onChange={(event) => onFile(event.target.files?.[0])}
@@ -2320,7 +2769,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
               </button>
             )}
             {fieldErrors.photo && (
-              <p className="field-error" id="report-photo-error" role="alert">
+              <p className="field-error" id="report-photo-error">
                 {fieldErrors.photo}
               </p>
             )}
@@ -2330,10 +2779,10 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
 
       {formStep === 3 && (
         <section className="wizard-panel" aria-labelledby="report-step-review">
-          <div className="review-card" id="report-step-review">
+          <div className={clsx("review-card", !photo && "has-error")} id="report-step-review">
             <strong>{selectedWard ? selectedWardLabel : "Ward not selected"}</strong>
             <span>{address || "No landmark added yet"}</span>
-            <small>{photo ? "Photo attached" : "Photo missing"}</small>
+            <small className={clsx(!photo && "is-error")}>{photo ? "Photo attached" : "Photo missing - go back and add a clear photo."}</small>
           </div>
           <label className="field">
             <span>How Bad Is It?</span>
@@ -2342,7 +2791,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
                 <button type="button" className={clsx(severity === key && "is-selected")} onClick={() => setSeverity(key as SeverityKey)} key={key}>
                   <SeverityMark severityKey={key as SeverityKey} />
                   <strong>{value.label}</strong>
-                  <small>{value.description}</small>
+                  <small>{SEVERITY_SHORT_DESCRIPTIONS[key as SeverityKey]}</small>
                 </button>
               ))}
             </div>
@@ -2393,7 +2842,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
               Next
             </button>
           ) : (
-            <button className="primary-cta" onClick={() => void submit()} disabled={submitting || submitSuccess || formOffline}>
+            <button className={clsx("primary-cta", formOffline && "is-offline")} onClick={() => void submit()} disabled={submitting || submitSuccess || formOffline}>
               {submitting ? <LoaderCircle className="spin" size={17} /> : submitSuccess ? <CheckCircle2 size={17} /> : <Send size={17} />}
               {submitSuccess ? "Report submitted" : submitting ? submitProgressText : formOffline ? "Offline - reconnect" : "Submit Report"}
             </button>
@@ -2441,9 +2890,53 @@ function ProfileSheet({
   });
   const activeReports = profileReports.filter((report) => report.status !== "resolved");
   const wardName = getDistinctWardName(ward);
+  const wardMla = ward ? data.representatives.find((item) => item.role === "mla" && item.constituency === ward.assembly_constituency) : null;
+  const wardMp = ward ? data.representatives.find((item) => item.role === "mp" && item.constituency === ward.parliamentary_constituency) : null;
+  const contactRep = rep ?? wardMla;
+  const [externalPreview, setExternalPreview] = useState<ExternalPreviewConfig | null>(null);
+  const averageActiveDays = Math.round(activeReports.reduce((sum, report) => sum + daysActive(report.created_at), 0) / Math.max(1, activeReports.length));
+
+  const previewCall = (label: string, value: string) => {
+    setExternalPreview({
+      confirmLabel: "Call now",
+      details: value,
+      helper: `This will start a phone call to ${label}.`,
+      title: `Call ${label}`
+    });
+  };
+
+  const shareWardData = async () => {
+    if (!ward) return;
+    const url = `${window.location.origin}/ward/${ward.ward_number}`;
+    const active = activeReports.length;
+    const name = wardName ? `Ward ${ward.ward_number} (${wardName})` : `Ward ${ward.ward_number}`;
+    const dayText = active ? ` for an avg of ${averageActiveDays} days` : "";
+    const text = `${name} has ${active} active garbage ${active === 1 ? "dump" : "dumps"} unresolved${dayText}. See: ${url}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: `Amma Odisha - ${name}`, text, url });
+      } else {
+        await navigator.clipboard?.writeText(text);
+      }
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      console.error("Share failed", caught);
+    }
+  };
+
+  const confirmProfileExternalAction = () => {
+    if (!externalPreview) return;
+    window.location.href = `tel:${externalPreview.details}`;
+    setExternalPreview(null);
+  };
 
   return (
-    <DialogSurface ariaLabel={isWard ? "Ward profile" : "Representative profile"} className="profile-sheet" onClose={onClose}>
+    <DialogSurface
+      ariaLabel={isWard ? "Ward profile" : "Representative profile"}
+      className="profile-sheet"
+      disableEscape={Boolean(externalPreview)}
+      onClose={onClose}
+    >
         <button className="sheet-back-button" type="button" onClick={onBackToReport ?? onClose}>
           <ChevronLeft size={16} />
           {returnReport ? "Back to report" : "Back to map"}
@@ -2465,18 +2958,67 @@ function ProfileSheet({
         <div className="metric-grid">
           <Metric label="unresolved" value={activeReports.length} />
           <Metric label="Total Reports" value={profileReports.length} />
-          <Metric label="Avg Days" value={Math.round(activeReports.reduce((sum, report) => sum + daysActive(report.created_at), 0) / Math.max(1, activeReports.length))} />
+          <Metric label="Avg Days" value={averageActiveDays} />
         </div>
         {isWard && ward ? (
-          <div className="accountability-card">
-            <h3>Responsible MLA</h3>
-            <p>{ward.assembly_constituency}</p>
-            <p>{ward.parliamentary_constituency}</p>
+          <div className="elected-reps-section">
+            <p className="eyebrow elected-reps-eyebrow">Elected Representatives for this Ward</p>
+            <div className="elected-reps-grid">
+              <div className="elected-rep-card">
+                <Avatar rep={wardMla ?? undefined} />
+                <strong>{wardMla?.name ?? "Not mapped"}</strong>
+                <span className="elected-rep-role" style={{ color: getPartyColor(wardMla?.party) }}>
+                  {wardMla ? `${wardMla.party} · MLA` : `${ward.assembly_constituency} · MLA`}
+                </span>
+              </div>
+              <div className="elected-rep-card">
+                <Avatar rep={wardMp ?? undefined} />
+                <strong>{wardMp?.name ?? "Not mapped"}</strong>
+                <span className="elected-rep-role" style={{ color: getPartyColor(wardMp?.party) }}>
+                  {wardMp ? `${wardMp.party} · MP` : `${ward.parliamentary_constituency} · MP`}
+                </span>
+              </div>
+            </div>
           </div>
         ) : (
           <div className="accountability-card">
             <h3>{selection.type === "mla" ? "Assembly Constituencies" : "Wards"}</h3>
             <p>Tap to view reports and top locations across this constituency.</p>
+          </div>
+        )}
+        {isWard && ward && (
+          <button className="share-ward-button" type="button" onClick={() => void shareWardData()}>
+            <Share2 size={14} />
+            Share ward data
+          </button>
+        )}
+        {contactRep && (contactRep.phone || contactRep.email || contactRep.twitter_handle || contactRep.profile_url) && (
+          <div className="rep-contact-card">
+            <h3>{isWard ? "Representative contact" : "Contact"}</h3>
+            {contactRep.phone && (
+              <button className="rep-contact-row" type="button" onClick={() => previewCall(contactRep.name, contactRep.phone ?? "")}>
+                <Phone size={14} />
+                <span>{contactRep.phone}</span>
+              </button>
+            )}
+            {contactRep.email && (
+              <a className="rep-contact-row" href={`mailto:${contactRep.email}`}>
+                <MessageCircle size={14} />
+                <span>{contactRep.email}</span>
+              </a>
+            )}
+            {contactRep.twitter_handle && (
+              <a className="rep-contact-row" href={`https://x.com/${contactRep.twitter_handle.replace(/^@/, "")}`} target="_blank" rel="noreferrer">
+                <ExternalLink size={14} />
+                <span>@{contactRep.twitter_handle.replace(/^@/, "")}</span>
+              </a>
+            )}
+            {contactRep.profile_url && (
+              <a className="rep-contact-row" href={contactRep.profile_url} target="_blank" rel="noreferrer">
+                <ArrowUpRight size={14} />
+                <span>Official profile</span>
+              </a>
+            )}
           </div>
         )}
         <h3>Top Locations</h3>
@@ -2489,6 +3031,16 @@ function ProfileSheet({
           emptyDescription="When citizens report spots in this area, they will appear here."
           onSelect={onSelectReport}
         />
+      {externalPreview && (
+        <ExternalAppPreview
+          confirmLabel={externalPreview.confirmLabel}
+          details={externalPreview.details}
+          helper={externalPreview.helper}
+          title={externalPreview.title}
+          onClose={() => setExternalPreview(null)}
+          onConfirm={confirmProfileExternalAction}
+        />
+      )}
     </DialogSurface>
   );
 }
@@ -2527,11 +3079,11 @@ function AboutSheet({ onClose, onOpenChangelog }: { onClose: () => void; onOpenC
           <p>Coverage: {BMC_CONTACTS.total_wards} wards (Ward {wardStart} to Ward {wardEnd}).</p>
         </div>
         <div className="social-row">
-          <a href="https://x.com/MrinallSamal" target="_blank" rel="noreferrer">
+          <a href="https://x.com/MrinallSamal" target="_blank" rel="noreferrer" aria-label="Follow Amma Odisha on X (Twitter)">
             Follow updates <ExternalLink size={13} />
           </a>
           <a href="https://x.com/realmojojojo_" target="_blank" rel="noreferrer">
-            Build By Mrinall Samal
+            Built by Mrinall Samal
           </a>
           <a href="https://ammaodisha.me" target="_blank" rel="noreferrer">
             ammaodisha.me
@@ -2568,7 +3120,7 @@ function ChangelogSheet({ onClose }: { onClose: () => void }) {
             </div>
             {entry.changes.map((change) => (
               <p key={change.text}>
-                <span>NEW</span> {change.text}
+                <span aria-hidden="true">NEW</span> {change.text}
               </p>
             ))}
           </div>
@@ -2577,15 +3129,41 @@ function ChangelogSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-function TelegramToast() {
+function MobileQRModal({ onClose, url }: { onClose: () => void; url: string }) {
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(url)}`;
+
+  return (
+    <DialogSurface ariaLabel="Report on mobile" className="mini-card mobile-qr-modal" onClose={onClose}>
+      <button className="close-button" onClick={onClose} aria-label="Close mobile QR code">
+        <X size={18} />
+      </button>
+      <h2>Report on your phone</h2>
+      <p className="mobile-qr-desc">Scan this code to open Amma Odisha with the report form ready for your camera.</p>
+      <div className="mobile-qr-frame">
+        <img src={qrUrl} alt="QR code to open the report form on mobile" width={220} height={220} />
+      </div>
+      <p className="mobile-qr-url">{url}</p>
+      <button
+        className="secondary-cta"
+        type="button"
+        onClick={() => void shareOrCopy({ title: "Report on Amma Odisha", text: "Open Amma Odisha on your phone to report with the camera.", url }, url)}
+      >
+        <Share2 size={15} />
+        Copy link
+      </button>
+    </DialogSurface>
+  );
+}
+
+function TelegramToast({ trigger }: { trigger: boolean }) {
   const [hidden, setHidden] = useState(() => readStorageValue("nk_telegram_hidden") === "1");
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (hidden) return;
-    const timer = window.setTimeout(() => setReady(true), 30000);
+    if (hidden || !trigger) return;
+    const timer = window.setTimeout(() => setReady(true), 8000);
     return () => window.clearTimeout(timer);
-  }, [hidden]);
+  }, [hidden, trigger]);
 
   if (hidden || !ready) return null;
   return (
@@ -2605,7 +3183,7 @@ function TelegramToast() {
         <strong>Join the community</strong>
         Feedback, ideas & updates on Telegram
       </span>
-      <a href="https://t.me/+23jgBr4Gz6BkYTFl" target="_blank" rel="noreferrer">
+      <a href="https://t.me/+23jgBr4Gz6BkYTFl" target="_blank" rel="noreferrer" aria-label="Join the Amma Odisha Telegram community">
         Join
       </a>
     </div>

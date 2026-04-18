@@ -14,6 +14,7 @@ interface MapViewProps {
   onSelectWard: (wardNumber: number) => void;
   focusWardNumber: number | null;
   focusRequestId: number;
+  onMapReady?: () => void;
 }
 
 interface ReportPointProperties {
@@ -34,12 +35,17 @@ interface WardRenderProperties extends WardFeatureProperties {
 }
 
 interface HoverWard {
+  assemblyConstituency?: string | null;
   reportCount: number;
   wardName: string;
   wardNumber: number;
-  x: number;
-  y: number;
   zone?: string | null;
+}
+
+interface TapWardChip {
+  activeReportCount: number;
+  wardName: string;
+  wardNumber: number;
 }
 
 type ReportPointCollection = FeatureCollection<Point, ReportPointProperties>;
@@ -171,12 +177,14 @@ export function MapView({
   onSelectReport,
   onSelectWard,
   focusWardNumber,
-  focusRequestId
+  focusRequestId,
+  onMapReady
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const onSelectReportRef = useRef(onSelectReport);
   const onSelectWardRef = useRef(onSelectWard);
+  const onMapReadyRef = useRef(onMapReady);
   const hoverWardIdRef = useRef<number | null>(null);
   const reportsByIdRef = useRef(new Map<string, GarbageReport>());
   const reportPointDataRef = useRef<ReportPointCollection>({ type: "FeatureCollection", features: [] });
@@ -184,6 +192,8 @@ export function MapView({
   const [mapReady, setMapReady] = useState(false);
   const [showClusterHint, setShowClusterHint] = useState(shouldShowClusterHint);
   const [hoverWard, setHoverWard] = useState<HoverWard | null>(null);
+  const [tapWardChip, setTapWardChip] = useState<TapWardChip | null>(null);
+  const tapWardChipTimerRef = useRef<number | null>(null);
   const reportPointData = useMemo(() => createReportPointData(reports, wardBoundaries), [reports, wardBoundaries]);
   const wardRenderData = useMemo(() => createWardRenderData(reports, wardBoundaries), [reports, wardBoundaries]);
   const coverageData = useMemo(() => createCoverageData(wardBoundaries, cityBoundary), [cityBoundary, wardBoundaries]);
@@ -192,7 +202,8 @@ export function MapView({
   useEffect(() => {
     onSelectReportRef.current = onSelectReport;
     onSelectWardRef.current = onSelectWard;
-  }, [onSelectReport, onSelectWard]);
+    onMapReadyRef.current = onMapReady;
+  }, [onMapReady, onSelectReport, onSelectWard]);
 
   useEffect(() => {
     reportPointDataRef.current = reportPointData;
@@ -430,8 +441,24 @@ export function MapView({
           if (report) onSelectReportRef.current(report);
         });
         map.on("click", WARD_FILL_LAYER_ID, (event) => {
-          const wardNumber = Number(event.features?.[0]?.properties?.ward_number);
-          if (wardNumber) onSelectWardRef.current(wardNumber);
+          const feature = event.features?.[0];
+          const wardNumber = Number(feature?.properties?.ward_number);
+          if (wardNumber) {
+            if (window.innerWidth < 640) {
+              if (tapWardChipTimerRef.current != null) window.clearTimeout(tapWardChipTimerRef.current);
+              setTapWardChip({
+                wardName: String(feature?.properties?.ward_name ?? `Ward ${wardNumber}`),
+                wardNumber,
+                activeReportCount: Number(feature?.properties?.report_count ?? 0)
+              });
+              tapWardChipTimerRef.current = window.setTimeout(() => setTapWardChip(null), 3000);
+            }
+            if (window.innerWidth < 640) {
+              window.setTimeout(() => onSelectWardRef.current(wardNumber), 320);
+            } else {
+              onSelectWardRef.current(wardNumber);
+            }
+          }
         });
         map.on("mousemove", WARD_FILL_LAYER_ID, (event) => {
           const feature = event.features?.[0];
@@ -447,11 +474,10 @@ export function MapView({
           }
 
           setHoverWard({
+            assemblyConstituency: typeof feature?.properties?.assembly_constituency === "string" ? feature.properties.assembly_constituency : null,
             reportCount: Number(feature?.properties?.visible_report_count ?? 0),
             wardName: String(feature?.properties?.ward_name ?? `Ward ${wardNumber}`),
             wardNumber,
-            x: event.point.x,
-            y: event.point.y,
             zone: typeof feature?.properties?.zone === "string" ? feature.properties.zone : null
           });
         });
@@ -472,6 +498,7 @@ export function MapView({
           });
         });
         setMapReady(true);
+        onMapReadyRef.current?.();
       });
     });
 
@@ -480,6 +507,10 @@ export function MapView({
       map?.remove();
       setMapReady(false);
       mapRef.current = null;
+      if (tapWardChipTimerRef.current != null) {
+        window.clearTimeout(tapWardChipTimerRef.current);
+        tapWardChipTimerRef.current = null;
+      }
     };
   }, [coverageData, wardBoundaries]);
 
@@ -547,27 +578,23 @@ export function MapView({
           Reports
         </span>
       </div>
-      <div className="map-heat-legend" aria-label="Ward report density legend">
-        <span>Ward reports</span>
-        <i className="is-low" aria-hidden="true" />
-        <i className="is-mid" aria-hidden="true" />
-        <i className="is-high" aria-hidden="true" />
-        <em>Low to high</em>
-      </div>
       {hoverWard && (
-        <div
-          className="map-ward-tooltip"
-          style={{ left: hoverWard.x, top: hoverWard.y }}
-          aria-hidden="true"
-        >
+        <div className="map-ward-tooltip" aria-hidden="true">
           <strong>{hoverWard.wardName}</strong>
           <span>
             Ward {hoverWard.wardNumber}
-            {hoverWard.zone ? ` - ${hoverWard.zone}` : ""}
+            {hoverWard.zone ? ` · ${hoverWard.zone}` : ""}
           </span>
-          <em>
-            {hoverWard.reportCount} visible {hoverWard.reportCount === 1 ? "report" : "reports"}
-          </em>
+          {hoverWard.assemblyConstituency && (
+            <small>{hoverWard.assemblyConstituency}</small>
+          )}
+          <em>{hoverWard.reportCount} reports</em>
+        </div>
+      )}
+      {tapWardChip && (
+        <div className="map-ward-tap-chip" aria-live="polite" aria-atomic="true">
+          <strong>{tapWardChip.wardName || `Ward ${tapWardChip.wardNumber}`}</strong>
+          <em>{tapWardChip.activeReportCount} active {tapWardChip.activeReportCount === 1 ? "report" : "reports"}</em>
         </div>
       )}
       {showClusterHint && (

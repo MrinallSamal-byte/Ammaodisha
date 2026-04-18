@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { IS_STAGING, LOCAL_REPORTS_KEY } from "./constants";
+import { IS_STAGING, LOCAL_REPORTS_KEY, OUTSIDE_CITY_LOCALITY_PATTERNS } from "./constants";
 import { findNearestWard, findWardInGeoJson, isInsideBoundary, pointInRing } from "./geo";
 import { canSubmitReport, getFingerprint, hasUpvoted, markUpvoted, recordSubmission } from "./limits";
 import type {
@@ -22,7 +22,13 @@ const supabaseAnonKey =
   (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ||
   (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
 const adminFunctionUrl = import.meta.env.VITE_ADMIN_FUNCTION_URL as string | undefined;
-const adminKeyFallback = import.meta.env.VITE_ADMIN_KEY || "demo";
+const adminKeyFallback = import.meta.env.VITE_ADMIN_KEY || "";
+
+if (import.meta.env.DEV && !import.meta.env.VITE_ADMIN_KEY) {
+  console.warn(
+    "[Amma Odisha] VITE_ADMIN_KEY is not set. Admin panel is disabled in local mode. Add it to .env.local to enable."
+  );
+}
 
 interface PoliticalRepresentativeProfile {
   name?: string;
@@ -372,9 +378,14 @@ function getWardSamplePoint(wardNumber: number, reportId: string, boundaries: Wa
   return getPolygonCentroid(polygon);
 }
 
+const outsideCityAddressPattern = new RegExp(
+  OUTSIDE_CITY_LOCALITY_PATTERNS.map((pattern) => pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"),
+  "i"
+);
+
 function shouldRewriteAddress(address: string, outsideCity: boolean) {
   if (outsideCity) return true;
-  return /bengaluru|bangalore|karnataka|hsr|koramangala|marathahalli|mahadevapura|banashankari/i.test(address);
+  return outsideCityAddressPattern.test(address);
 }
 
 function normalizeToBhubaneswar(
@@ -756,7 +767,7 @@ class LocalBackend implements Backend {
   }
 
   private assertAdmin(adminKey: string) {
-    if (!adminKey || (adminKeyFallback && adminKey !== adminKeyFallback)) throw new Error("Invalid admin key");
+    if (!adminKey || !adminKeyFallback || adminKey !== adminKeyFallback) throw new Error("Invalid admin key");
   }
 }
 
