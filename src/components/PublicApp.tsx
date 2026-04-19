@@ -52,10 +52,10 @@ const FOCUSABLE_SELECTOR =
 const APP_VERSION = "0.3.0";
 const POPULAR_WARD_NUMBERS = [40, 30, 36, 37, 38, 41, 34, 19];
 const SEVERITY_SHORT_DESCRIPTIONS: Record<SeverityKey, string> = {
-  small: "Under 1m2",
-  medium: "About 1-5m2",
-  large: "Covers 5-20m2",
-  massive: "20m2+ or a full stretch"
+  small: "Under 1m²",
+  medium: "About 1–5m²",
+  large: "Covers 5–20m²",
+  massive: "20m²+ or a full stretch"
 };
 const SEVERITY_FILTER_OPTIONS: { key: "all" | SeverityKey; label: string }[] = [
   { key: "all", label: "All severity" },
@@ -598,6 +598,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
       <header className="topbar safe-top">
         <div className="brand-chip">
           <button className="brand-home" onClick={() => navigate("/")} aria-label="Go to Amma Odisha map">
+            <img src="/logo.png" alt="" className="brand-logo" />
             <span className="brand-wordmark">
               <strong>
                 Amma <b>Odisha</b>
@@ -819,16 +820,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
 
       <footer className="bottom-action-bar safe-bottom">
         <button
-          className="desktop-handoff-cta"
-          type="button"
-          onClick={() => setShowMobileQR(true)}
-          aria-label="Scan QR to report from your phone"
-        >
-          <Smartphone size={17} />
-          Scan QR to Report
-        </button>
-        <button
-          className="mobile-report-cta"
+          className="report-cta-button"
           type="button"
           onClick={() => setShowReportForm(true)}
           aria-label="Report a garbage dump"
@@ -842,6 +834,15 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
             <strong>{visibleReports.length}</strong>
             <small>Insights</small>
           </span>
+        </button>
+        <button
+          className="qr-icon-button"
+          type="button"
+          onClick={() => setShowMobileQR(true)}
+          aria-label="Open on phone via QR"
+          title="Scan QR to report on mobile"
+        >
+          <Smartphone size={18} />
         </button>
       </footer>
 
@@ -1155,9 +1156,9 @@ function InsightsSheet({
         </p>
 
         <div className="metric-grid insights-metrics">
-          <Metric label="active reports" value={unresolvedCount} />
-          <Metric label="resolved" value={resolvedCount} />
-          <Metric label="still open" value={`${activeShare}%`} />
+          <Metric label="Active" value={unresolvedCount} />
+          <Metric label="Resolved" value={resolvedCount} />
+          <Metric label="Still Open" value={`${activeShare}%`} />
         </div>
 
         <div className="accountability-card">
@@ -1213,19 +1214,19 @@ function IntroOverlay({ onClose, onStartReport }: { onClose: () => void; onStart
       </button>
       <IntroHeroImage />
       <div className="intro-card-body">
-      <img src="/logo.png" alt="" />
-      <p className="eyebrow">Bhubaneswar (BMC)</p>
-      <h2>Report garbage. Hold your ward accountable.</h2>
-      <p>Every garbage dump is mapped, photographed, and linked to the responsible ward, MLA, and MP.</p>
-      <p className="intro-action-copy">Tap a red dot on the map to see a report, or start a new one.</p>
-      <b>67 wards · 4 MLAs · 1 MP · All of Bhubaneswar</b>
-      <button className="primary-cta intro-report-cta" onClick={onStartReport} aria-label="Report a garbage dump near you">
-        <Plus size={16} />
-        Report garbage near me
-      </button>
-      <button className="intro-explore-link" onClick={onClose} type="button">
-        Start using map
-      </button>
+        <img src="/logo.png" alt="" />
+        <p className="eyebrow">Bhubaneswar (BMC)</p>
+        <h2>Report garbage. Hold your ward accountable.</h2>
+        <p>Every garbage dump is mapped, photographed, and linked to the responsible ward, MLA, and MP.</p>
+        <p className="intro-action-copy">Tap a red dot on the map to see a report, or start a new one.</p>
+        <b>67 wards · 4 MLAs · 1 MP · All of Bhubaneswar</b>
+        <button className="primary-cta intro-report-cta" onClick={onStartReport} aria-label="Report a garbage dump near you">
+          <Plus size={16} />
+          Report garbage near me
+        </button>
+        <button className="intro-explore-link" onClick={onClose} type="button">
+          Start using map
+        </button>
       </div>
     </DialogSurface>
   );
@@ -1608,6 +1609,9 @@ function ReportDetail({
       onClose={onClose}
       disableEscape={showResolve || Boolean(externalPreview)}
     >
+        {/* ── Mobile drag pill ── */}
+        <div className="detail-drag-pill" aria-hidden="true" />
+
         {/* ── Header: severity + status chips | share + close ── */}
         <div className="detail-header">
           <div className="detail-header-left">
@@ -2689,7 +2693,8 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
                           key={ward.ward_number}
                           type="button"
                           role="option"
-                          aria-selected={isSelected || isActive}
+                          aria-selected={isSelected}
+                          aria-current={isActive ? "true" : undefined}
                           className={clsx(isSelected && "is-selected", isActive && "is-active")}
                           onMouseEnter={() => setActiveWardIndex(index)}
                           onPointerDown={(event) => event.preventDefault()}
@@ -2956,7 +2961,7 @@ function ProfileSheet({
           </div>
         </div>
         <div className="metric-grid">
-          <Metric label="unresolved" value={activeReports.length} />
+          <Metric label="Unresolved" value={activeReports.length} />
           <Metric label="Total Reports" value={profileReports.length} />
           <Metric label="Avg Days" value={averageActiveDays} />
         </div>

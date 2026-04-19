@@ -316,12 +316,14 @@ function AdminStat({ label, value, color }: { label: string; value: number; colo
 
 function SkeletonCard() {
   return (
-    <div className="moderation-card skeleton">
-      <div className="skeleton-photo" />
-      <div className="skeleton-lines">
-        <span />
-        <span />
-        <span />
+    <div className="moderation-card">
+      <div className="moderation-main">
+        <span className="skeleton-photo" aria-hidden="true" />
+        <div className="skeleton-lines" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
       </div>
     </div>
   );
