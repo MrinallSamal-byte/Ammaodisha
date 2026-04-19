@@ -16,6 +16,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { backend } from "../services/backend";
 import { SEVERITY } from "../services/constants";
+import { LOCAL_REPORT_PHOTO_FALLBACK_URL, ODISHA_GARBAGE_FALLBACK_IMAGE } from "../services/report-images";
 import { timeAgo } from "../services/time";
 import type { AdminStats, GarbageReport, ModerationStatus } from "../types/domain";
 
@@ -345,6 +346,8 @@ function ModerationCard({
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [photoRevealed, setPhotoRevealed] = useState(false);
+  const [useFallbackPhoto, setUseFallbackPhoto] = useState(() => !report.photo_url);
+  const [fallbackPhotoFailed, setFallbackPhotoFailed] = useState(false);
   const [undoVisible, setUndoVisible] = useState(false);
   const undoTimerRef = useRef<number | null>(null);
   const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
@@ -352,12 +355,24 @@ function ModerationCard({
   const reason = metadata.flag_reason || metadata.rejection_reason || "";
   const duplicate = reason === "potential_duplicate" && report._duplicate_original;
   const isNsfwPhoto = reason === "safesearch_failed";
+  const photoUrl = fallbackPhotoFailed
+    ? LOCAL_REPORT_PHOTO_FALLBACK_URL
+    : useFallbackPhoto
+      ? ODISHA_GARBAGE_FALLBACK_IMAGE.photo_url
+      : report.photo_url ?? ODISHA_GARBAGE_FALLBACK_IMAGE.photo_url;
+  const isFallbackPhoto = useFallbackPhoto || fallbackPhotoFailed || !report.photo_url;
+  const shouldCoverPhoto = isNsfwPhoto && !photoRevealed && !isFallbackPhoto;
 
   useEffect(() => {
     return () => {
       if (undoTimerRef.current != null) window.clearTimeout(undoTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    setUseFallbackPhoto(!report.photo_url);
+    setFallbackPhotoFailed(false);
+  }, [report.photo_url]);
 
   const run = async (decision: ModerationStatus) => {
     if (decision === "rejected") {
@@ -393,24 +408,31 @@ function ModerationCard({
   return (
     <article className="moderation-card" style={{ animationDelay: `${index * 40}ms` }}>
       <div className="moderation-main">
-        {report.photo_url ? (
-          <button
-            className={clsx("moderation-photo", isNsfwPhoto && !photoRevealed && "is-covered")}
-            onClick={() => {
-              if (isNsfwPhoto && !photoRevealed) {
-                setPhotoRevealed(true);
+        <button
+          className={clsx("moderation-photo", shouldCoverPhoto && "is-covered")}
+          onClick={() => {
+            if (shouldCoverPhoto) {
+              setPhotoRevealed(true);
+              return;
+            }
+            onViewPhoto(photoUrl);
+          }}
+          aria-label={shouldCoverPhoto ? "Reveal NSFW photo to review" : "View full photo"}
+        >
+          <img
+            src={photoUrl}
+            alt=""
+            referrerPolicy="no-referrer"
+            onError={() => {
+              if (useFallbackPhoto) {
+                setFallbackPhotoFailed(true);
                 return;
               }
-              onViewPhoto(report.photo_url!);
+              setUseFallbackPhoto(true);
             }}
-            aria-label={isNsfwPhoto && !photoRevealed ? "Reveal NSFW photo to review" : "View full photo"}
-          >
-            <img src={report.photo_url} alt="" />
-            {isNsfwPhoto && !photoRevealed && <span>Reveal</span>}
-          </button>
-        ) : (
-          <span>No photo</span>
-        )}
+          />
+          {isFallbackPhoto ? <span>Fallback</span> : shouldCoverPhoto && <span>Reveal</span>}
+        </button>
         <div>
           <h2>{report.address}</h2>
           <p>

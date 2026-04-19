@@ -34,6 +34,7 @@ import { BMC_CONTACTS, BMC_HELPLINE, BMC_NUMBER, CHANGELOG, CATEGORIES, PARTY_CO
 import { backend } from "../services/backend";
 import { findNearestWard, findWardInGeoJson, isInsideBoundary } from "../services/geo";
 import { canSubmitReport, hasUpvoted } from "../services/limits";
+import { LOCAL_REPORT_PHOTO_FALLBACK_URL, ODISHA_GARBAGE_FALLBACK_IMAGE } from "../services/report-images";
 import { generateBMCComplaint, getReportShareText, getWhatsAppUrl, shareOrCopy } from "../services/share";
 import { daysActive, timeAgo } from "../services/time";
 import type {
@@ -1415,40 +1416,39 @@ function ReportPhoto({
   variant: "detail" | "thumb";
   width?: number | null;
 }) {
-  const [failed, setFailed] = useState(false);
+  const [useFallback, setUseFallback] = useState(() => !src);
+  const [fallbackFailed, setFallbackFailed] = useState(false);
 
   useEffect(() => {
-    setFailed(false);
+    setUseFallback(!src);
+    setFallbackFailed(false);
   }, [src]);
 
-  if (!src || failed) {
-    if (variant === "detail") {
-      return (
-        <div className="detail-photo empty" role="img" aria-label="No photo attached">
-          <Camera size={28} />
-          <span>No photo attached</span>
-        </div>
-      );
-    }
-    return (
-      <span className="photo-placeholder" role="img" aria-label="No photo">
-        <Camera size={14} />
-        <span>No photo</span>
-      </span>
-    );
-  }
+  const imageSrc = fallbackFailed
+    ? LOCAL_REPORT_PHOTO_FALLBACK_URL
+    : useFallback
+      ? ODISHA_GARBAGE_FALLBACK_IMAGE.photo_url
+      : src ?? ODISHA_GARBAGE_FALLBACK_IMAGE.photo_url;
+  const imageWidth = useFallback && !fallbackFailed ? ODISHA_GARBAGE_FALLBACK_IMAGE.width : width;
+  const imageHeight = useFallback && !fallbackFailed ? ODISHA_GARBAGE_FALLBACK_IMAGE.height : height;
 
   return (
     <img
       className={variant === "detail" ? "detail-photo" : "report-thumb"}
-      src={src}
+      src={imageSrc}
       alt={alt}
       loading={loading ?? (variant === "thumb" ? "lazy" : "eager")}
       decoding="async"
       referrerPolicy="no-referrer"
-      width={width ?? undefined}
-      height={height ?? undefined}
-      onError={() => setFailed(true)}
+      width={imageWidth ?? undefined}
+      height={imageHeight ?? undefined}
+      onError={() => {
+        if (useFallback) {
+          setFallbackFailed(true);
+          return;
+        }
+        setUseFallback(true);
+      }}
     />
   );
 }

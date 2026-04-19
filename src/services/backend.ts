@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { IS_STAGING, LOCAL_REPORTS_KEY, OUTSIDE_CITY_LOCALITY_PATTERNS } from "./constants";
 import { findNearestWard, findWardInGeoJson, isInsideBoundary, pointInRing } from "./geo";
 import { canSubmitReport, getFingerprint, hasUpvoted, markUpvoted, recordSubmission } from "./limits";
+import { ODISHA_GARBAGE_FALLBACK_IMAGE } from "./report-images";
 import type {
   AdminStats,
   Backend,
@@ -265,19 +266,6 @@ function addReportImageAttribution(report: GarbageReport, image: ReportImageRepl
   };
 }
 
-function clearDuplicateReportImage(report: GarbageReport): GarbageReport {
-  return {
-    ...report,
-    photo_url: null,
-    photo_source_url: null,
-    photo_source_title: null,
-    photo_license: null,
-    photo_credit: null,
-    photo_width: null,
-    photo_height: null
-  };
-}
-
 function pickUnusedReportImage(replacements: ReportImageReplacement[], usedPhotoUrls: Set<string>, seed: string) {
   if (!replacements.length || usedPhotoUrls.size >= replacements.length) return null;
 
@@ -291,9 +279,11 @@ function pickUnusedReportImage(replacements: ReportImageReplacement[], usedPhoto
 }
 
 function applyReportImageReplacements(reports: GarbageReport[], replacements: ReportImageReplacement[]) {
-  if (!replacements.length) return reports;
+  const uniqueReplacements = [
+    ...new Map([...replacements, ODISHA_GARBAGE_FALLBACK_IMAGE].map((image) => [image.photo_url, image])).values()
+  ];
+  if (!uniqueReplacements.length) return reports;
 
-  const uniqueReplacements = [...new Map(replacements.map((image) => [image.photo_url, image])).values()];
   const replacementsByUrl = new Map(uniqueReplacements.map((image) => [image.photo_url, image]));
   const usedPhotoUrls = new Set<string>();
 
@@ -310,12 +300,12 @@ function applyReportImageReplacements(reports: GarbageReport[], replacements: Re
       return report;
     }
 
-    if (!existingReplacement && !isLegacyReportPhoto(report) && (!currentPhotoUrl || !usedPhotoUrls.has(currentPhotoUrl))) {
-      return report;
+    if (!currentPhotoUrl) {
+      return addReportImageAttribution(report, ODISHA_GARBAGE_FALLBACK_IMAGE);
     }
 
     const image = pickUnusedReportImage(uniqueReplacements, usedPhotoUrls, `${report.id}:${index}`);
-    if (!image) return currentPhotoUrl ? clearDuplicateReportImage(report) : report;
+    if (!image) return addReportImageAttribution(report, ODISHA_GARBAGE_FALLBACK_IMAGE);
 
     usedPhotoUrls.add(image.photo_url);
     return addReportImageAttribution(report, image);
@@ -975,7 +965,8 @@ class SupabaseBackend extends LocalBackend {
 
   override async adminQueue(adminKey: string, status: ModerationStatus) {
     const response = await this.callAdmin<{ reports: GarbageReport[] }>(adminKey, `queue&status=${status}`);
-    return response.reports.map(normalizeReport);
+    const replacementImages = await fetchReportImageReplacements();
+    return applyReportImageReplacements(response.reports.map(normalizeReport), replacementImages);
   }
 
   override async moderateReport(adminKey: string, reportId: string, decision: ModerationStatus) {
