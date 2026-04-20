@@ -1657,12 +1657,6 @@ function ReportDetail({
             width={report.photo_width}
             height={report.photo_height}
           />
-          {report.photo_source_url && (
-            <a className="photo-credit detail-photo-credit" href={report.photo_source_url} target="_blank" rel="noreferrer">
-              Image source: {report.photo_credit ?? "Wikimedia Commons"}
-              {report.photo_license ? ` - ${report.photo_license}` : ""}
-            </a>
-          )}
           <button
             className={clsx("detail-upvote-overlay", upvoted && "is-upvoted", upvoteBump && "is-bumped")}
             onClick={() => void upvote()}
@@ -1781,11 +1775,11 @@ function ReportDetail({
             </div>
             {report.status !== "resolved" && (
               <div className="resolve-action-group">
-                <button onClick={() => setShowResolve(true)} className="green-action">
+                <button className="green-action" disabled title="Cleanup proof requires moderator review">
                   <CheckCircle2 size={16} />
-                  Mark as Cleaned
+                  Cleanup Review
                 </button>
-                <small>You must be within 500m of this spot to verify cleanup.</small>
+                <small>Cleanup proof is being moved behind moderator review before reports can be marked resolved.</small>
               </div>
             )}
           </div>

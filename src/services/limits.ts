@@ -18,10 +18,18 @@ function readStringArray(key: string) {
   }
 }
 
+function createFingerprint() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  if (!globalThis.crypto?.getRandomValues) return `fp-${Date.now().toString(36)}`;
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export function getFingerprint() {
   let value = localStorage.getItem(FINGERPRINT_KEY);
   if (!value) {
-    value = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    value = createFingerprint();
     localStorage.setItem(FINGERPRINT_KEY, value);
   }
   return value;

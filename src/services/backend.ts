@@ -23,11 +23,12 @@ const supabaseAnonKey =
   (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ||
   (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
 const adminFunctionUrl = import.meta.env.VITE_ADMIN_FUNCTION_URL as string | undefined;
-const adminKeyFallback = import.meta.env.VITE_ADMIN_KEY || "";
+const localAdminKey = import.meta.env.DEV ? (import.meta.env.VITE_LOCAL_ADMIN_KEY as string | undefined) || "" : "";
+const PUBLIC_REPORTS_VIEW = "public_garbage_reports";
 
-if (import.meta.env.DEV && !import.meta.env.VITE_ADMIN_KEY) {
+if (import.meta.env.DEV && !localAdminKey) {
   console.warn(
-    "[Amma Odisha] VITE_ADMIN_KEY is not set. Admin panel is disabled in local mode. Add it to .env.local to enable."
+    "[Amma Odisha] VITE_LOCAL_ADMIN_KEY is not set. Admin panel is disabled in local mode. Add it to .env.local to enable."
   );
 }
 
@@ -245,11 +246,44 @@ function hashString(input: string) {
   return hash >>> 0;
 }
 
+const INDIA_GARBAGE_IMAGE_POOL: ReportImageReplacement[] = [
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Garbage%20on%20a%20roadside.JPG", title: "Garbage on a roadside, India", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 800, height: 600 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Litter%20in%20India.jpg", title: "Litter in India", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Garbage%20Burning%20-%20Kanpur%2020220509%20083327.jpg", title: "Garbage Burning, Kanpur 2022", source_page: null, license: "CC BY-SA 4.0", credit: "Wikimedia Commons", width: 1280, height: 720 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/City%20Garbage%20Dump%20-%20Dhapa%20-%20Kolkata%202010-08-06%207017.JPG", title: "City Garbage Dump, Dhapa, Kolkata", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/City%20Garbage%20Dump%20-%20Dhapa%20-%20Kolkata%202010-08-06%207017%20%28cropped%29.JPG", title: "City Garbage Dump, Dhapa, Kolkata (cropped)", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 900, height: 600 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Burning%20Garbage%20-%20East%20Kolkata%20Wetlands%20-%20Nalban%20-%20Kolkata%202017-06-09%202031.JPG", title: "Burning Garbage, East Kolkata Wetlands 2017", source_page: null, license: "CC BY-SA 4.0", credit: "Wikimedia Commons", width: 1280, height: 960 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Ducks%20in%20Litter%20at%20Lalbagh%20%2814954009291%29.jpg", title: "Litter at Lalbagh, Bengaluru", source_page: null, license: "CC BY 2.0", credit: "Wikimedia Commons", width: 1024, height: 683 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/GangaTheLife.jpg", title: "Garbage along the Ganga, Varanasi", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Litter%20on%20farmland.jpg", title: "Litter on farmland, India", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Jaipur%20trash%20recycling.JPG", title: "Trash and waste, Jaipur", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Beautiful%20Nature%20-%20Garbage%20Dump%20at%20Sonmarg%20Glacier%20-%20Jammu%20%26%20Kashmir%20-%20India%20%2826843490645%29.jpg", title: "Garbage dump, Sonmarg, Jammu & Kashmir", source_page: null, license: "CC BY 2.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Cow%20in%20Delhi-1.jpg", title: "Street garbage with cow, Delhi", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Cow%20in%20Delhi-2.jpg", title: "Street waste with cattle, Delhi", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Cow%20in%20Delhi-3.jpg", title: "Roadside garbage, Delhi", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Biodiversity%20of%20River%20Hooghly.jpg", title: "Waste along River Hooghly, Kolkata", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Dog%20sleeping%20on%20newspaper%20waste.jpg", title: "Street waste with stray dog, India", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Clean%20your%20city-P1080552.jpg", title: "Garbage pile on street, Kolkata", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Cleaning%20time%20near%20Maniktala%20crossing-P1080538.jpg", title: "Waste heap, Maniktala crossing, Kolkata", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Dhapa%20Road%20-%20Eastern%20Metropolitan%20Bypass%20-%20Kolkata%202012-09-18%200910.JPG", title: "Garbage dump, Dhapa Road, Kolkata", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Entrance%20-%20Solid%20Waste%20Disposal%20Ground%20-%20Kolkata%202012-09-18%200910%20%28cropped%29.JPG", title: "Solid waste disposal site, Kolkata", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 900, height: 675 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/India-5237%20-%20Flickr%20-%20archer10%20%28Dennis%29.jpg", title: "Street garbage, India", source_page: null, license: "CC BY-SA 2.0", credit: "Wikimedia Commons", width: 1024, height: 683 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/India-6017%20-%20Flickr%20-%20archer10%20%28Dennis%29.jpg", title: "Street waste, India", source_page: null, license: "CC BY-SA 2.0", credit: "Wikimedia Commons", width: 1024, height: 683 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Dol%20Aftermath.jpg", title: "Post-festival waste on street, Kolkata", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/City%20kolkata%20Municipal%20Corporation.jpg", title: "Kolkata municipal garbage", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Close%20up%20image%20displaying%20trash%20scattered%20by%20the%20road%20side.jpg", title: "Roadside trash, India", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://upload.wikimedia.org/wikipedia/commons/b/b7/The_waste_dumped_in_drainage.jpg", title: "Waste dumped in drain, India", source_page: null, license: "CC BY-SA 4.0", credit: "Wikimedia Commons", width: 348, height: 260 },
+  { photo_url: "https://www.orissapost.com/wp-content/uploads/2025/09/Daringbadi.jpg", title: "Garbage dumps, Daringbadi, Odisha", source_page: null, license: null, credit: "OrissaPOST", width: 1280, height: 545 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Puri%2006a%20egret%20%2827585693220%29.jpg", title: "Waste near Puri beach, Odisha", source_page: null, license: "CC BY-SA 2.0", credit: "Wikimedia Commons", width: 500, height: 375 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Crossing%20the%20street%20in%20Mathura.jpg", title: "Street garbage, Mathura, Uttar Pradesh", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Litter%20in%20India.jpg", title: "Public place litter, India", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 }
+];
+
 let reportImageReplacementCache: Promise<ReportImageReplacement[]> | null = null;
 
 function fetchReportImageReplacements() {
   if (!reportImageReplacementCache) {
-    reportImageReplacementCache = fetchJson<ReportImageReplacement[]>("/report-image-sources.json").catch(() => []);
+    reportImageReplacementCache = Promise.resolve(INDIA_GARBAGE_IMAGE_POOL);
   }
   return reportImageReplacementCache;
 }
@@ -765,7 +799,7 @@ class LocalBackend implements Backend {
   }
 
   private assertAdmin(adminKey: string) {
-    if (!adminKey || !adminKeyFallback || adminKey !== adminKeyFallback) throw new Error("Invalid admin key");
+    if (!adminKey || !localAdminKey || adminKey !== localAdminKey) throw new Error("Invalid admin key");
   }
 }
 
@@ -813,8 +847,8 @@ class SupabaseBackend extends LocalBackend {
 
   private async getReliableUpvoteCount(reportId: string) {
     const [reportResult, upvoteCountResult] = await Promise.all([
-      this.client.from("garbage_reports").select("upvote_count").eq("id", reportId).maybeSingle(),
-      this.client.from("report_upvotes").select("id", { count: "exact", head: true }).eq("report_id", reportId)
+      this.client.from(PUBLIC_REPORTS_VIEW).select("upvote_count").eq("id", reportId).maybeSingle(),
+      this.client.from("report_upvotes").select("report_id", { count: "exact", head: true }).eq("report_id", reportId)
     ]);
 
     if (reportResult.error) throw reportResult.error;
@@ -853,9 +887,8 @@ class SupabaseBackend extends LocalBackend {
 
   override async fetchReports() {
     let query = this.client
-      .from("garbage_reports")
+      .from(PUBLIC_REPORTS_VIEW)
       .select("*")
-      .neq("moderation_status", "rejected")
       .order("created_at", { ascending: false });
     if (!IS_STAGING) query = query.eq("is_test", false);
     const { data, error } = await query;
@@ -866,7 +899,7 @@ class SupabaseBackend extends LocalBackend {
   }
 
   override async fetchReportById(id: string) {
-    const { data, error } = await this.client.from("garbage_reports").select("*").eq("id", id).single();
+    const { data, error } = await this.client.from(PUBLIC_REPORTS_VIEW).select("*").eq("id", id).single();
     if (error) return null;
     const [reportWithCount] = await this.mergeDerivedUpvoteCounts([data as GarbageReport]);
     const replacementImages = await fetchReportImageReplacements();
@@ -875,10 +908,9 @@ class SupabaseBackend extends LocalBackend {
 
   override async fetchReportsByWard(wardNumber: number) {
     const { data, error } = await this.client
-      .from("garbage_reports")
+      .from(PUBLIC_REPORTS_VIEW)
       .select("*")
       .eq("ward_number", wardNumber)
-      .neq("moderation_status", "rejected")
       .order("created_at", { ascending: false });
     if (error) throw error;
     const withCounts = await this.mergeDerivedUpvoteCounts((data ?? []) as GarbageReport[]);
@@ -892,10 +924,9 @@ class SupabaseBackend extends LocalBackend {
     if (error) throw error;
     if (!wards?.length) return [];
     const { data, error: reportError } = await this.client
-      .from("garbage_reports")
+      .from(PUBLIC_REPORTS_VIEW)
       .select("*")
       .in("ward_number", wards.map((w) => w.ward_number))
-      .neq("moderation_status", "rejected")
       .order("created_at", { ascending: false });
     if (reportError) throw reportError;
     const withCounts = await this.mergeDerivedUpvoteCounts((data ?? []) as GarbageReport[]);
@@ -906,29 +937,31 @@ class SupabaseBackend extends LocalBackend {
   override async submitReport(input: NewReportInput) {
     const limit = canSubmitReport();
     if (!limit.allowed) throw new Error("Daily limit of 5 reports reached. Try again tomorrow.");
-    const payload = IS_STAGING ? { ...input, is_test: true } : input;
-    const { data, error } = await this.client.from("garbage_reports").insert(payload).select().single();
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const payload = { ...input, id, is_test: IS_STAGING };
+    const { error } = await this.client.from("garbage_reports").insert(payload);
     if (error) throw error;
     recordSubmission();
-    return normalizeReport(data);
+    return normalizeReport({
+      ...input,
+      id,
+      status: "unresolved",
+      created_at: now,
+      updated_at: now,
+      upvote_count: 1,
+      is_test: IS_STAGING,
+      moderation_status: "flagged",
+      moderation_metadata: {
+        flag_reason: "pending_review",
+        moderated_at: now
+      },
+      flag_count: 0
+    });
   }
 
-  override async resolveReport(reportId: string, input: ResolveReportInput) {
-    const { data, error } = await this.client
-      .from("garbage_reports")
-      .update({
-        status: "resolved",
-        resolved_at: new Date().toISOString(),
-        resolved_photo_url: input.photoUrl ?? null,
-        resolved_lat: input.lat,
-        resolved_lng: input.lng,
-        resolved_by_name: input.name || "Anonymous Citizen"
-      })
-      .eq("id", reportId)
-      .select()
-      .single();
-    if (error) throw error;
-    return normalizeReport(data);
+  override async resolveReport(_reportId: string, _input: ResolveReportInput) {
+    throw new Error("Cleanup proof now requires moderator review before a report can be marked resolved.");
   }
 
   override async upvoteReport(reportId: string) {
@@ -955,7 +988,7 @@ class SupabaseBackend extends LocalBackend {
     reportUploadProgress(options, 0);
     const compressed = await compressImage(file);
     reportUploadProgress(options, 5);
-    const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+    const name = `${crypto.randomUUID()}.jpg`;
     const path = `reports/${name}`;
     await uploadStorageObjectWithProgress({
       bucket: "garbage-photos",
