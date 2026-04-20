@@ -73,6 +73,17 @@ interface ReportImageReplacement {
   width?: number | null;
 }
 
+interface ReportImageSourceRecord {
+  credit?: string | null;
+  height?: number | null;
+  license?: string | null;
+  original_url?: string | null;
+  photo_url?: string | null;
+  source_page?: string | null;
+  title?: string | null;
+  width?: number | null;
+}
+
 function hasSupabaseConfig() {
   return Boolean(supabaseUrl && supabaseAnonKey);
 }
@@ -289,7 +300,29 @@ let reportImageReplacementCache: Promise<ReportImageReplacement[]> | null = null
 
 function fetchReportImageReplacements() {
   if (!reportImageReplacementCache) {
-    reportImageReplacementCache = Promise.resolve(INDIA_GARBAGE_IMAGE_POOL);
+    reportImageReplacementCache = fetchJson<ReportImageSourceRecord[]>("/report-image-sources.json")
+      .then((sources) => {
+        const normalized: ReportImageReplacement[] = [];
+        sources.forEach((source) => {
+          const photoUrl = source.photo_url?.trim();
+          if (!photoUrl) return;
+
+          normalized.push({
+            photo_url: photoUrl,
+            title: source.title ?? null,
+            source_page: source.source_page ?? null,
+            original_url: source.original_url ?? null,
+            license: source.license ?? null,
+            credit: source.credit ?? "Wikimedia Commons",
+            width: source.width ?? null,
+            height: source.height ?? null
+          });
+        });
+
+        const deduped = [...new Map(normalized.map((source) => [source.photo_url, source])).values()];
+        return deduped.length ? deduped : INDIA_GARBAGE_IMAGE_POOL;
+      })
+      .catch(() => INDIA_GARBAGE_IMAGE_POOL);
   }
   return reportImageReplacementCache;
 }
@@ -324,6 +357,20 @@ function pickUnusedReportImage(replacements: ReportImageReplacement[], usedPhoto
   return null;
 }
 
+function pickReportImage(replacements: ReportImageReplacement[], usedPhotoUrls: Set<string>, seed: string) {
+  if (!replacements.length) return null;
+
+  const unusedImage = pickUnusedReportImage(replacements, usedPhotoUrls, seed);
+  if (unusedImage) {
+    usedPhotoUrls.add(unusedImage.photo_url);
+    return unusedImage;
+  }
+
+  // Once we exhaust the pool, still spread assignments deterministically
+  // instead of collapsing every remaining report to one fallback image.
+  return replacements[hashString(seed) % replacements.length];
+}
+
 function applyReportImageReplacements(reports: GarbageReport[], replacements: ReportImageReplacement[]) {
   const uniqueReplacements = [
     ...new Map([...replacements, ODISHA_GARBAGE_FALLBACK_IMAGE].map((image) => [image.photo_url, image])).values()
@@ -347,13 +394,13 @@ function applyReportImageReplacements(reports: GarbageReport[], replacements: Re
     }
 
     if (!currentPhotoUrl) {
-      return addReportImageAttribution(report, ODISHA_GARBAGE_FALLBACK_IMAGE);
+      const image = pickReportImage(uniqueReplacements, usedPhotoUrls, `${report.id}:${index}:missing`);
+      if (!image) return addReportImageAttribution(report, ODISHA_GARBAGE_FALLBACK_IMAGE);
+      return addReportImageAttribution(report, image);
     }
 
-    const image = pickUnusedReportImage(uniqueReplacements, usedPhotoUrls, `${report.id}:${index}`);
+    const image = pickReportImage(uniqueReplacements, usedPhotoUrls, `${report.id}:${index}`);
     if (!image) return addReportImageAttribution(report, ODISHA_GARBAGE_FALLBACK_IMAGE);
-
-    usedPhotoUrls.add(image.photo_url);
     return addReportImageAttribution(report, image);
   });
 }
