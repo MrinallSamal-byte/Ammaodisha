@@ -443,21 +443,20 @@ export function MapView({
         map.on("click", WARD_FILL_LAYER_ID, (event) => {
           const feature = event.features?.[0];
           const wardNumber = Number(feature?.properties?.ward_number);
-          if (wardNumber) {
-            if (window.innerWidth < 640) {
-              if (tapWardChipTimerRef.current != null) window.clearTimeout(tapWardChipTimerRef.current);
-              setTapWardChip({
-                wardName: String(feature?.properties?.ward_name ?? `Ward ${wardNumber}`),
-                wardNumber,
-                activeReportCount: Number(feature?.properties?.report_count ?? 0)
-              });
-              tapWardChipTimerRef.current = window.setTimeout(() => setTapWardChip(null), 3000);
-            }
-            if (window.innerWidth < 640) {
-              window.setTimeout(() => onSelectWardRef.current(wardNumber), 320);
-            } else {
-              onSelectWardRef.current(wardNumber);
-            }
+          if (!wardNumber) return;
+
+          const isMobile = window.innerWidth < 640;
+          if (isMobile) {
+            if (tapWardChipTimerRef.current != null) window.clearTimeout(tapWardChipTimerRef.current);
+            setTapWardChip({
+              wardName: String(feature?.properties?.ward_name ?? `Ward ${wardNumber}`),
+              wardNumber,
+              activeReportCount: Number(feature?.properties?.report_count ?? 0)
+            });
+            tapWardChipTimerRef.current = window.setTimeout(() => setTapWardChip(null), 3000);
+            window.setTimeout(() => onSelectWardRef.current(wardNumber), 320);
+          } else {
+            onSelectWardRef.current(wardNumber);
           }
         });
         map.on("mousemove", WARD_FILL_LAYER_ID, (event) => {
@@ -531,7 +530,7 @@ export function MapView({
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const timer = window.setInterval(() => {
       const map = mapRef.current;
-      if (!map?.getLayer(PRIORITY_REPORT_LAYER_ID)) return;
+      if (!map?.isStyleLoaded() || !map.getLayer(PRIORITY_REPORT_LAYER_ID)) return;
       const progress = (Date.now() % 1900) / 1900;
       map.setPaintProperty(PRIORITY_REPORT_LAYER_ID, "circle-radius", ["+", ["get", "severitySize"], 12 + progress * 20]);
       map.setPaintProperty(PRIORITY_REPORT_LAYER_ID, "circle-opacity", 0.18 * (1 - progress));

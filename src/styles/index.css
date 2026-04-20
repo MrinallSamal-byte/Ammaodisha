@@ -208,20 +208,21 @@ button:focus-visible, a:focus-visible {
 .maplibregl-ctrl-attrib {
   background: transparent !important;
   color: #8b95a2 !important;
-  font-size: 8px !important;
-  opacity: 0.5;
+  font-size: 9px !important;
+  opacity: 0.6;
+  max-width: 280px;
 }
-.maplibregl-ctrl-group,
-.maplibregl-ctrl-geolocate {
+
+.maplibregl-ctrl-group {
   overflow: hidden;
   border: 1px solid var(--line) !important;
   border-radius: var(--radius-sm) !important;
   box-shadow: var(--shadow-sm) !important;
 }
+
 .maplibregl-ctrl-bottom-right,
 .maplibregl-ctrl-bottom-left { bottom: 14px !important; }
 .maplibregl-ctrl-bottom-right { right: 14px !important; }
-.maplibregl-ctrl-attrib { opacity: 0.5; }
 
 /* Markers */
 .garbage-marker {
@@ -498,22 +499,13 @@ button:focus-visible, a:focus-visible {
 .brand-home {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
   min-height: 44px;
   border-radius: 8px;
-  padding: 2px 4px 2px 0;
+  padding: 2px 4px;
   background: transparent;
   color: var(--text-strong);
   text-align: left;
-}
-
-.brand-logo {
-  width: 26px;
-  height: 26px;
-  flex: 0 0 auto;
-  border-radius: 6px;
-  object-fit: contain;
 }
 
 .brand-wordmark {
@@ -875,7 +867,7 @@ button:focus-visible, a:focus-visible {
   bottom: 0;
   z-index: var(--z-bar);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: stretch;
   gap: 8px;
   padding: 8px 16px max(var(--safe-bottom), 8px);
@@ -893,7 +885,37 @@ button:focus-visible, a:focus-visible {
   height: auto;
 }
 
+/* Scan QR to Report — desktop-only dark CTA */
+.scan-qr-cta-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 52px;
+  border-radius: var(--radius-sm);
+  background: #0d1117;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  border: 1px solid rgb(255 255 255 / 8%);
+  transition: background var(--transition-smooth), box-shadow var(--transition-smooth);
+}
+
+.scan-qr-cta-button:hover {
+  background: #1c2433;
+  box-shadow: 0 4px 18px rgb(13 17 23 / 40%);
+}
+
+.scan-qr-cta-button:not(:disabled):active { transform: scale(0.97); }
+
 /* Primary CTA */
+.secondary-cta.compact {
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
 .primary-cta,
 .bulk-action,
 .admin-login button {
@@ -1005,9 +1027,9 @@ button:focus-visible, a:focus-visible {
   font-weight: 800;
 }
 
-/* Report CTA (primary bottom bar button) */
+/* Report CTA — hidden on desktop, shown on mobile via media query */
 .report-cta-button {
-  display: inline-flex;
+  display: none;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -1029,9 +1051,9 @@ button:focus-visible, a:focus-visible {
 
 .report-cta-button:not(:disabled):active { transform: scale(0.97); }
 
-/* QR icon button (compact, bottom bar) */
+/* QR icon button — retired, always hidden */
 .qr-icon-button {
-  display: inline-flex;
+  display: none !important;
   align-items: center;
   justify-content: center;
   min-width: 52px;
@@ -2103,17 +2125,6 @@ button:focus-visible, a:focus-visible {
   opacity: 0.94;
 }
 
-.primary-detail-action.is-upvoted {
-  background: var(--green-soft);
-  color: var(--green);
-  opacity: 1;
-}
-
-.primary-detail-action.is-upvoted:disabled { opacity: 1; }
-
-.primary-detail-action.is-bumped {
-  animation: upvote-bump 0.55s ease-out;
-}
 
 .directions-link {
   display: inline-flex;
@@ -2219,14 +2230,6 @@ button:focus-visible, a:focus-visible {
   line-height: 1.35;
 }
 
-.already-voted-note {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 800;
-  text-align: center;
-  animation: fade-in 0.2s ease-out;
-}
 
 .anonymous {
   display: flex;
@@ -2312,6 +2315,7 @@ button:focus-visible, a:focus-visible {
   font-size: 12px;
   font-weight: 800;
   text-align: center;
+  animation: fade-in 0.2s ease-out;
 }
 
 .rep-contact-row {
@@ -3149,6 +3153,12 @@ button:focus-visible, a:focus-visible {
 
 .social-row a:hover { background: var(--surface-muted); transform: translateY(-1px); }
 
+.social-row .secondary-cta.compact {
+  min-height: 38px;
+  font-size: 12px;
+  padding: 0 12px;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    Changelog
    ═══════════════════════════════════════════════════════════════ */
@@ -3204,6 +3214,9 @@ button:focus-visible, a:focus-visible {
 }
 
 .profile-sheet > h3:first-of-type { border-top: 0; margin-top: 4px; }
+
+/* Narrow variant used by ChangelogSheet */
+.profile-sheet.small { max-width: 440px; }
 
 /* ═══════════════════════════════════════════════════════════════
    Resolve Modal
@@ -3382,7 +3395,7 @@ button:focus-visible, a:focus-visible {
 .report-coach-mark::after {
   content: "";
   position: absolute;
-  right: 28px;
+  left: 28px;
   bottom: -8px;
   width: 14px;
   height: 14px;
@@ -3396,13 +3409,21 @@ button:focus-visible, a:focus-visible {
 .report-coach-mark strong { grid-column: 1; color: var(--text); font-size: 13px; line-height: 1.35; }
 
 .report-coach-mark button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   grid-row: 1 / span 2;
   grid-column: 2;
+  align-self: center;
+  width: 44px;
+  height: 44px;
   min-width: 44px;
   min-height: 44px;
+  padding: 0;
   border-radius: var(--radius-sm);
   background: var(--surface-muted);
   color: var(--text-muted);
+  line-height: 0;
   pointer-events: auto;
 }
 
@@ -3433,6 +3454,21 @@ button:focus-visible, a:focus-visible {
   word-break: break-all;
 }
 
+.mobile-qr-fallback {
+  display: grid;
+  place-items: center;
+  width: 220px;
+  height: 220px;
+  margin: 0;
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+  line-height: 1.5;
+}
+
 .mobile-qr-modal .secondary-cta { width: 100%; min-height: 44px; }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -3454,6 +3490,29 @@ button:focus-visible, a:focus-visible {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
   animation: pulse-gentle 2s ease-in-out infinite;
+}
+
+.loading-state h1 {
+  margin: 0 0 8px;
+  color: var(--text-strong);
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.loading-state > p {
+  margin: 0 0 16px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.loading-state small {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-family: "Google Sans Code", ui-monospace, monospace;
+  word-break: break-all;
 }
 
 .loading-state button {
@@ -3529,6 +3588,25 @@ button:focus-visible, a:focus-visible {
 .admin-login-field { display: grid; gap: 7px; margin-top: 14px; text-align: left; }
 .admin-login-field span { color: var(--text-muted); font-size: 12px; font-weight: 900; }
 .admin-login input { margin: 0; }
+.admin-login button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  margin-top: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--gradient-primary);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 900;
+  box-shadow: 0 2px 8px rgb(227 27 35 / 28%);
+  transition: box-shadow var(--transition-smooth), opacity var(--transition-smooth);
+}
+
+.admin-login button:hover { box-shadow: 0 4px 14px rgb(227 27 35 / 36%); opacity: 0.95; }
+.admin-login button:disabled { opacity: 0.5; }
 
 .admin-shell {
   height: 100dvh;
@@ -3598,9 +3676,16 @@ button:focus-visible, a:focus-visible {
 
 .admin-tabs button.is-active { color: var(--text-strong); background: var(--surface); box-shadow: var(--shadow-xs); }
 
-.admin-cards { display: grid; gap: 12px; padding: 10px 16px 64px; }
+.admin-cards { display: grid; gap: 12px; padding: 10px 16px calc(max(var(--safe-bottom), 16px) + 48px); }
 
-.bulk-action { background: var(--green); }
+.bulk-action {
+  background: var(--green);
+  color: #ffffff;
+  min-height: 40px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 900;
+}
 
 .moderation-card {
   overflow: hidden;
@@ -3667,7 +3752,7 @@ button:focus-visible, a:focus-visible {
   align-items: center;
   justify-content: space-between;
   border-top: 1px solid var(--line-soft);
-  background: var(--surface);
+  background: var(--surface-soft);
   color: var(--text-faint);
   padding: 10px 14px;
   font-size: 12px;
@@ -3704,6 +3789,9 @@ button:focus-visible, a:focus-visible {
 }
 
 .moderation-actions button.reject { background: var(--primary-soft); color: var(--primary-deep); }
+
+.moderation-actions button:hover { filter: brightness(0.94); }
+.moderation-actions button:not(:disabled):active { transform: scale(0.97); }
 
 .admin-empty, .empty {
   padding: 28px 16px;
@@ -3886,13 +3974,13 @@ button:focus-visible, a:focus-visible {
 }
 
 @keyframes tooltip-enter {
-  from { opacity: 0; transform: translate(8px, calc(-110% - 5px)); }
-  to { opacity: 1; transform: translate(8px, -110%); }
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes tooltip-enter-flipped {
-  from { opacity: 0; transform: translate(-100%, calc(-110% - 5px)); }
-  to { opacity: 1; transform: translate(-100%, -110%); }
+  from { opacity: 0; transform: translate(-100%, 4px); }
+  to { opacity: 1; transform: translate(-100%, 0); }
 }
 
 @keyframes tap-chip-enter {
@@ -3917,7 +4005,7 @@ button:focus-visible, a:focus-visible {
 
   .modal-layer { padding: 24px; }
 
-  .detail-sheet > .sheet-back-button,
+  .detail-sheet > .detail-back-btn,
   .form-sheet > .sheet-back-button,
   .profile-sheet > .sheet-back-button,
   .insights-sheet > .sheet-back-button,
@@ -4029,11 +4117,9 @@ button:focus-visible, a:focus-visible {
 
   .bottom-action-bar { padding-right: 12px; padding-left: 12px; }
 
-  .bottom-action-bar {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .qr-icon-button { display: none; }
+  /* Mobile: show red report CTA; hide desktop scan-QR button */
+  .report-cta-button { display: inline-flex; }
+  .scan-qr-cta-button { display: none; }
 
   .report-cta-button,
   .insights-button {
@@ -4052,8 +4138,6 @@ button:focus-visible, a:focus-visible {
   .form-footer { margin-right: -16px; margin-left: -16px; padding-right: 16px; padding-left: 16px; }
 
   .filter-grid, .filter-actions { grid-template-columns: 1fr; }
-
-  .primary-action-row, .contact-actions { grid-template-columns: 1fr; }
 
   .contact-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 

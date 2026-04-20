@@ -87,11 +87,22 @@ export const STATUS_LABELS = {
 // BJD (Biju Janata Dal) added — dominant party in Odisha and present across
 // most Bhubaneswar wards. Without it, BJD reps fell through with no color.
 export const PARTY_COLORS: Record<string, string> = {
-  BJP: "#FF6B00",
-  BJD: "#00a859",
-  INC: "#00BFFF",
-  JDS: "#00C853",
-  AAP: "#5C6BC0"
+  BJP:  "#FF6B00",  // Bharatiya Janata Party — saffron
+  BJD:  "#00a859",  // Biju Janata Dal — green
+  INC:  "#00BFFF",  // Indian National Congress — sky blue
+  JDS:  "#00C853",  // Janata Dal (Secular)
+  AAP:  "#5C6BC0",  // Aam Aadmi Party — indigo
+  SP:   "#E53935",  // Samajwadi Party — red
+  BSP:  "#1565C0",  // Bahujan Samaj Party — blue
+  TMC:  "#43A047",  // Trinamool Congress — green
+  DMK:  "#F44336",  // Dravida Munnetra Kazhagam — red
+  YSRCP:"#7B1FA2",  // YSR Congress Party — purple
+  TDP:  "#FFD600",  // Telugu Desam Party — yellow
+  SS:   "#FF8F00",  // Shiv Sena — orange
+  NCP:  "#1976D2",  // Nationalist Congress Party — blue
+  RJD:  "#E65100",  // Rashtriya Janata Dal — deep orange
+  JDU:  "#0097A7",  // Janata Dal (United) — teal
+  INDEPENDENT: "#78909C"  // Independent — blue-grey
 };
 
 export const ESCALATION_THRESHOLDS = [3, 5, 10, 20, 50];

@@ -37,9 +37,9 @@ export function getReportShareText(report: GarbageReport, ward?: Ward, mla?: Rep
     report.created_at
   )} days unresolved.
 MLA: ${mla?.name ?? "?"} (${mla?.party ?? "?"})
-Tracked on Amma Odisha -> ${url}
+Tracked on Amma Odisha → ${url}
 
-Report garbage in your ward -> ${origin}`;
+Report garbage in your ward → ${origin}`;
 }
 
 export function getWhatsAppUrl(message: string) {

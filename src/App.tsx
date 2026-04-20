@@ -68,8 +68,8 @@ export default function App() {
       <Suspense
         fallback={
           <main className="loading-state">
-            <img src="/Favicon.svg" alt="" />
-            <p>Loading admin panel...</p>
+            <img src="/logo.png" alt="Amma Odisha" />
+            <p>Loading admin panel…</p>
           </main>
         }
       >
@@ -81,10 +81,10 @@ export default function App() {
   if (error) {
     return (
       <main className="loading-state">
-        <img src="/Favicon.svg" alt="" />
-        <h1>Could not load Amma Odisha</h1>
-        <p>{error}</p>
-        <button onClick={() => location.reload()}>Try again</button>
+        <img src="/logo.png" alt="Amma Odisha" />
+        <h1>Couldn’t load the map</h1>
+        <p>Check your connection and try again.<br /><small>{error}</small></p>
+        <button onClick={() => location.reload()}>Reload</button>
       </main>
     );
   }
@@ -92,8 +92,8 @@ export default function App() {
   if (!data) {
     return (
       <main className="loading-state">
-        <img src="/Favicon.svg" alt="" />
-        <p>Fetching Bhubaneswar ward data...</p>
+        <img src="/logo.png" alt="Amma Odisha" />
+        <p>Loading Bhubaneswar ward data…</p>
         <span className="loading-progress" aria-hidden="true" />
         <div className="loading-skeleton-list" aria-hidden="true">
           <span />
@@ -107,11 +107,11 @@ export default function App() {
   return (
     <Suspense
       fallback={
-        <main className="loading-state">
-          <img src="/Favicon.svg" alt="" />
-          <p>Loading map experience...</p>
-        </main>
-      }
+          <main className="loading-state">
+            <img src="/logo.png" alt="Amma Odisha" />
+            <p>Loading map experience…</p>
+          </main>
+        }
     >
       <PublicApp
         autoOpenReport={autoOpenReport}

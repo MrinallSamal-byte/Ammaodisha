@@ -163,7 +163,7 @@ export interface Backend {
   submitReport(input: NewReportInput): Promise<GarbageReport>;
   resolveReport(reportId: string, input: ResolveReportInput): Promise<GarbageReport>;
   upvoteReport(reportId: string): Promise<{ alreadyVoted: boolean; newCount?: number }>;
-  uploadReportPhoto(file: File, options?: UploadReportPhotoOptions): Promise<string | null>;
+  uploadReportPhoto(file: File, options?: UploadReportPhotoOptions): Promise<string>;
   adminStats(adminKey: string): Promise<AdminStats>;
   adminQueue(adminKey: string, status: ModerationStatus): Promise<GarbageReport[]>;
   moderateReport(adminKey: string, reportId: string, decision: ModerationStatus): Promise<void>;

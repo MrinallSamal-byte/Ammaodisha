@@ -1,28 +1,33 @@
 {
   "rewrites": [
+    { "source": "/admin", "destination": "/" },
+    { "source": "/admin/:path*", "destination": "/" },
+    { "source": "/report/:path*", "destination": "/" },
+    { "source": "/ward/:path*", "destination": "/" },
+    { "source": "/mla/:path*", "destination": "/" },
+    { "source": "/mp/:path*", "destination": "/" }
+  ],
+  "headers": [
     {
-      "source": "/admin",
-      "destination": "/"
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "geolocation=(self), camera=(self)" }
+      ]
     },
     {
-      "source": "/admin/:path*",
-      "destination": "/"
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
     },
     {
-      "source": "/report/:path*",
-      "destination": "/"
-    },
-    {
-      "source": "/ward/:path*",
-      "destination": "/"
-    },
-    {
-      "source": "/mla/:path*",
-      "destination": "/"
-    },
-    {
-      "source": "/mp/:path*",
-      "destination": "/"
+      "source": "/(manifest\\.json|Favicon\\.svg|logo\\.png|apple-touch-icon\\.png)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=86400" }
+      ]
     }
   ]
 }

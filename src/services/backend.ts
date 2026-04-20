@@ -76,10 +76,16 @@ function hasSupabaseConfig() {
   return Boolean(supabaseUrl && supabaseAnonKey);
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
-  return response.json() as Promise<T>;
+async function fetchJson<T>(url: string, timeoutMs = 30_000): Promise<T> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
+    return response.json() as Promise<T>;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 function normalizeReport(report: GarbageReport): GarbageReport {
@@ -492,7 +498,9 @@ async function compressImage(file: File): Promise<File> {
       const canvas = document.createElement("canvas");
       canvas.width = width;
       canvas.height = height;
-      canvas.getContext("2d")?.drawImage(image, 0, 0, width, height);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { resolve(file); return; }
+      ctx.drawImage(image, 0, 0, width, height);
       canvas.toBlob(
         (blob) => {
           if (!blob) { resolve(file); return; }

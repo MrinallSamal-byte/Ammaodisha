@@ -22,10 +22,8 @@ async function getRuntimeReportPath(page: Page) {
 test("public map shell loads", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("button", { name: /About Amma Odisha/i })).toBeVisible();
-  const usesMobileFooter = await page.evaluate(() => window.matchMedia("(max-width: 640px)").matches);
-  await expect(
-    page.getByRole("button", { name: usesMobileFooter ? /Report a garbage dump/i : /Scan QR to report from your phone/i })
-  ).toBeVisible();
+  // Report Garbage is the primary CTA on both mobile and desktop after the bottom bar redesign.
+  await expect(page.getByRole("button", { name: /Report a garbage dump/i })).toBeVisible();
   await expect(page.getByRole("dialog", { name: /Amma Odisha intro/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /Open Amma Odisha insights/i })).toBeVisible();
   await expect(page.getByLabel("Map cluster guidance")).toContainText("Grouped reports");

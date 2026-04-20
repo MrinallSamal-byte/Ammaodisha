@@ -599,7 +599,6 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
       <header className="topbar safe-top">
         <div className="brand-chip">
           <button className="brand-home" onClick={() => navigate("/")} aria-label="Go to Amma Odisha map">
-            <img src="/logo.png" alt="" className="brand-logo" />
             <span className="brand-wordmark">
               <strong>
                 Amma <b>Odisha</b>
@@ -829,21 +828,21 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
           <Camera size={17} />
           Report Garbage
         </button>
+        <button
+          className="scan-qr-cta-button"
+          type="button"
+          onClick={() => setShowMobileQR(true)}
+          aria-label="Scan QR to report on mobile"
+        >
+          <Smartphone size={17} />
+          Scan QR to Report
+        </button>
         <button className="insights-button" type="button" onClick={() => setShowInsights(true)} aria-label="Open Amma Odisha insights">
           <BarChart3 size={18} />
           <span>
             <strong>{visibleReports.length}</strong>
             <small>Insights</small>
           </span>
-        </button>
-        <button
-          className="qr-icon-button"
-          type="button"
-          onClick={() => setShowMobileQR(true)}
-          aria-label="Open on phone via QR"
-          title="Scan QR to report on mobile"
-        >
-          <Smartphone size={18} />
         </button>
       </footer>
 
@@ -1642,7 +1641,7 @@ function ReportDetail({
 
         {/* ── Title + location ── */}
         <div className="detail-title-area">
-          <h2>{ward?.locality_name?.trim() || getDistinctWardName(ward) || `Ward ${report.ward_number}`}</h2>
+          <h2>{ward?.locality_name?.trim() || getDistinctWardName(ward) || ward?.ward_name || `Ward ${report.ward_number}`}</h2>
           <p className="detail-location">
             <MapPin size={13} />
             {report.address}
@@ -2935,6 +2934,36 @@ function ProfileSheet({
     setExternalPreview(null);
   };
 
+  if (isWard && !ward) {
+    return (
+      <DialogSurface
+        ariaLabel="Ward not found"
+        className="profile-sheet"
+        onClose={onClose}
+      >
+        <button className="sheet-back-button" type="button" onClick={onClose}>
+          <ChevronLeft size={16} />
+          Back to map
+        </button>
+        <button className="close-button" onClick={onClose} aria-label="Close profile">
+          <X size={18} />
+        </button>
+        <div className="profile-hero">
+          <Layers size={28} />
+          <div>
+            <p className="eyebrow">Ward Profile</p>
+            <h2>Ward {selection.id}</h2>
+            <p>No data available</p>
+          </div>
+        </div>
+        <div className="accountability-card">
+          <h3>Ward not found</h3>
+          <p>This ward couldn't be found in our data. It may have been renumbered or the link may be outdated.</p>
+        </div>
+      </DialogSurface>
+    );
+  }
+
   return (
     <DialogSurface
       ariaLabel={isWard ? "Ward profile" : "Representative profile"}
@@ -2992,7 +3021,7 @@ function ProfileSheet({
           </div>
         )}
         {isWard && ward && (
-          <button className="share-ward-button" type="button" onClick={() => void shareWardData()}>
+          <button className="share-ward-button" type="button" aria-label={`Share data for Ward ${ward.ward_number}`} onClick={() => void shareWardData()}>
             <Share2 size={14} />
             Share ward data
           </button>
@@ -3094,8 +3123,7 @@ function AboutSheet({ onClose, onOpenChangelog }: { onClose: () => void; onOpenC
             ammaodisha.me
           </a>
           <button
-            className="secondary-cta"
-            style={{ minHeight: 38, fontSize: 12 }}
+            className="secondary-cta compact"
             onClick={onOpenChangelog}
           >
             View Changelog
@@ -3136,6 +3164,7 @@ function ChangelogSheet({ onClose }: { onClose: () => void }) {
 
 function MobileQRModal({ onClose, url }: { onClose: () => void; url: string }) {
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(url)}`;
+  const [qrFailed, setQrFailed] = useState(false);
 
   return (
     <DialogSurface ariaLabel="Report on mobile" className="mini-card mobile-qr-modal" onClose={onClose}>
@@ -3145,7 +3174,21 @@ function MobileQRModal({ onClose, url }: { onClose: () => void; url: string }) {
       <h2>Report on your phone</h2>
       <p className="mobile-qr-desc">Scan this code to open Amma Odisha with the report form ready for your camera.</p>
       <div className="mobile-qr-frame">
-        <img src={qrUrl} alt="QR code to open the report form on mobile" width={220} height={220} />
+        {qrFailed ? (
+          <p className="mobile-qr-fallback">
+            QR image unavailable.<br />
+            Copy the link below instead.
+          </p>
+        ) : (
+          <img
+            src={qrUrl}
+            alt="QR code to open the report form on mobile"
+            width={220}
+            height={220}
+            loading="lazy"
+            onError={() => setQrFailed(true)}
+          />
+        )}
       </div>
       <p className="mobile-qr-url">{url}</p>
       <button
@@ -3172,7 +3215,7 @@ function TelegramToast({ trigger }: { trigger: boolean }) {
 
   if (hidden || !ready) return null;
   return (
-    <div className="telegram-toast">
+    <div className="telegram-toast" role="status" aria-live="polite" aria-atomic="true">
       <button
         className="toast-close"
         onClick={() => {

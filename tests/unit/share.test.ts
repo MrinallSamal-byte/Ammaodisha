@@ -30,5 +30,6 @@ describe("share helpers", () => {
     const mla = { name: "A. Citizen", party: "INC" } as Representative;
 
     expect(getReportShareText(report, ward, mla, "https://ammaodisha.in")).toContain("MLA: A. Citizen (INC)");
+    expect(getReportShareText(report, ward, mla, "https://ammaodisha.in")).toContain("→");
   });
 });
