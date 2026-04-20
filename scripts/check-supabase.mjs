@@ -52,9 +52,19 @@ if (supabaseAnonKey) {
     assert(Boolean(error), "raw GPS columns were readable with the public key");
   });
 
-  await check("Storage bucket garbage-photos is reachable", async () => {
+  await check("Storage bucket garbage-photos listing is blocked for public key", async () => {
     const { error } = await supabase.storage.from("garbage-photos").list("reports", { limit: 1 });
-    if (error) throw error;
+    assert(Boolean(error), "bucket listing is still allowed for the public key");
+  });
+
+  await check("Storage bucket garbage-photos public URL endpoint is reachable", async () => {
+    const { data } = supabase.storage.from("garbage-photos").getPublicUrl("reports/__public_probe__.jpg");
+    const response = await fetch(data.publicUrl, { method: "GET" });
+    assert(response.status !== 401 && response.status !== 403, "public object URL requires auth");
+    assert(
+      response.status === 200 || response.status === 404,
+      `expected 200/404 from public object URL, got ${response.status}`
+    );
   });
 }
 

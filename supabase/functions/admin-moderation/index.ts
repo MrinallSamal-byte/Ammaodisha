@@ -14,11 +14,14 @@ const allowedOrigins = new Set(
     .map((origin) => origin.trim())
     .filter(Boolean)
 );
-const fallbackOrigin = DEFAULT_ALLOWED_ORIGINS[1];
 const baseCorsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-admin-key",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Vary": "Origin"
+};
+const deniedCorsHeaders = {
+  ...baseCorsHeaders,
+  "Access-Control-Allow-Origin": "null"
 };
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -28,7 +31,12 @@ const supabase = createClient(supabaseUrl, serviceRoleKey);
 const MODERATION_STATUSES = new Set(["flagged", "approved", "rejected"]);
 
 Deno.serve(async (request) => {
-  const corsHeaders = getCorsHeaders(request);
+  const origin = (request.headers.get("Origin") ?? "").trim();
+  if (origin && !allowedOrigins.has(origin)) {
+    return json({ error: "Origin not allowed" }, 403, deniedCorsHeaders);
+  }
+
+  const corsHeaders = getCorsHeaders(origin);
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   const providedKey = request.headers.get("x-admin-key");
@@ -135,11 +143,11 @@ function json(body: unknown, status = 200, corsHeaders: Record<string, string>) 
   });
 }
 
-function getCorsHeaders(request: Request) {
-  const origin = request.headers.get("Origin") ?? "";
+function getCorsHeaders(origin: string) {
+  if (!origin) return { ...baseCorsHeaders };
   return {
     ...baseCorsHeaders,
-    "Access-Control-Allow-Origin": allowedOrigins.has(origin) ? origin : fallbackOrigin
+    "Access-Control-Allow-Origin": origin
   };
 }
 

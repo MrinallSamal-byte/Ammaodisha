@@ -77,6 +77,12 @@ function hasSupabaseConfig() {
   return Boolean(supabaseUrl && supabaseAnonKey);
 }
 
+function isMissingPublicReportSurface(error: unknown) {
+  const code = (error as { code?: string }).code;
+  const message = error instanceof Error ? error.message : String((error as { message?: string }).message ?? error);
+  return code === "42P01" || message.includes(PUBLIC_REPORTS_VIEW);
+}
+
 async function fetchJson<T>(url: string, timeoutMs = 30_000): Promise<T> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -807,6 +813,7 @@ class LocalBackend implements Backend {
 
 class SupabaseBackend extends LocalBackend {
   private client: SupabaseClient;
+  private fallback = new LocalBackend();
 
   constructor() {
     super();
@@ -892,7 +899,10 @@ class SupabaseBackend extends LocalBackend {
       .order("created_at", { ascending: false });
     if (!IS_STAGING) query = query.eq("is_test", false);
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) {
+      if (isMissingPublicReportSurface(error)) return this.fallback.fetchReports();
+      throw error;
+    }
     const withCounts = await this.mergeDerivedUpvoteCounts((data ?? []) as GarbageReport[]);
     const replacementImages = await fetchReportImageReplacements();
     return applyReportImageReplacements(withCounts.map(normalizeReport), replacementImages);
@@ -900,7 +910,10 @@ class SupabaseBackend extends LocalBackend {
 
   override async fetchReportById(id: string) {
     const { data, error } = await this.client.from(PUBLIC_REPORTS_VIEW).select("*").eq("id", id).single();
-    if (error) return null;
+    if (error) {
+      if (isMissingPublicReportSurface(error)) return this.fallback.fetchReportById(id);
+      return null;
+    }
     const [reportWithCount] = await this.mergeDerivedUpvoteCounts([data as GarbageReport]);
     const replacementImages = await fetchReportImageReplacements();
     return applyReportImageReplacements([normalizeReport(reportWithCount)], replacementImages)[0] ?? null;
@@ -912,7 +925,10 @@ class SupabaseBackend extends LocalBackend {
       .select("*")
       .eq("ward_number", wardNumber)
       .order("created_at", { ascending: false });
-    if (error) throw error;
+    if (error) {
+      if (isMissingPublicReportSurface(error)) return this.fallback.fetchReportsByWard(wardNumber);
+      throw error;
+    }
     const withCounts = await this.mergeDerivedUpvoteCounts((data ?? []) as GarbageReport[]);
     const replacementImages = await fetchReportImageReplacements();
     return applyReportImageReplacements(withCounts.map(normalizeReport), replacementImages);
@@ -928,7 +944,10 @@ class SupabaseBackend extends LocalBackend {
       .select("*")
       .in("ward_number", wards.map((w) => w.ward_number))
       .order("created_at", { ascending: false });
-    if (reportError) throw reportError;
+    if (reportError) {
+      if (isMissingPublicReportSurface(reportError)) return this.fallback.fetchReportsByConstituency(constituency, type);
+      throw reportError;
+    }
     const withCounts = await this.mergeDerivedUpvoteCounts((data ?? []) as GarbageReport[]);
     const replacementImages = await fetchReportImageReplacements();
     return applyReportImageReplacements(withCounts.map(normalizeReport), replacementImages);
@@ -961,6 +980,8 @@ class SupabaseBackend extends LocalBackend {
   }
 
   override async resolveReport(_reportId: string, _input: ResolveReportInput): Promise<GarbageReport> {
+    void _reportId;
+    void _input;
     throw new Error("Cleanup proof now requires moderator review before a report can be marked resolved.");
   }
 
