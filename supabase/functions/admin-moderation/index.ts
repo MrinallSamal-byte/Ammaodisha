@@ -1,9 +1,24 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.87.1";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+const DEFAULT_ALLOWED_ORIGINS = [
+  "https://ammaodisha.me",
+  "https://www.ammaodisha.me",
+  "https://ammaodisha.vercel.app",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:4173"
+];
+const allowedOrigins = new Set(
+  (Deno.env.get("ADMIN_ALLOWED_ORIGINS") ?? DEFAULT_ALLOWED_ORIGINS.join(","))
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
+const fallbackOrigin = DEFAULT_ALLOWED_ORIGINS[1];
+const baseCorsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-admin-key",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS"
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Vary": "Origin"
 };
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -13,29 +28,30 @@ const supabase = createClient(supabaseUrl, serviceRoleKey);
 const MODERATION_STATUSES = new Set(["flagged", "approved", "rejected"]);
 
 Deno.serve(async (request) => {
+  const corsHeaders = getCorsHeaders(request);
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   const providedKey = request.headers.get("x-admin-key");
-  if (!adminKey || providedKey !== adminKey) {
-    return json({ error: "Unauthorized" }, 401);
+  if (!adminKey || !providedKey || !constantTimeEquals(providedKey, adminKey)) {
+    return json({ error: "Unauthorized" }, 401, corsHeaders);
   }
 
   const url = new URL(request.url);
   const action = url.searchParams.get("action") ?? "stats";
 
   try {
-    if (action === "stats") return json(await stats());
-    if (action === "queue") return json({ reports: await queue(url.searchParams.get("status") ?? "flagged") });
+    if (action === "stats") return json(await stats(), 200, corsHeaders);
+    if (action === "queue") return json({ reports: await queue(url.searchParams.get("status") ?? "flagged") }, 200, corsHeaders);
 
     const body = request.method === "POST" ? await request.json() : {};
-    if (action === "moderate") return json(await moderate(body.reportId, body.decision));
-    if (action === "bulk") return json(await bulk(body.reportIds ?? [], body.decision));
-    if (action === "swap_duplicate") return json(await swapDuplicate(body.reportId, body.existingId));
-    if (action === "reject_both") return json(await rejectBoth(body.reportId, body.existingId));
+    if (action === "moderate") return json(await moderate(body.reportId, body.decision), 200, corsHeaders);
+    if (action === "bulk") return json(await bulk(body.reportIds ?? [], body.decision), 200, corsHeaders);
+    if (action === "swap_duplicate") return json(await swapDuplicate(body.reportId, body.existingId), 200, corsHeaders);
+    if (action === "reject_both") return json(await rejectBoth(body.reportId, body.existingId), 200, corsHeaders);
 
-    return json({ error: "Unknown action" }, 404);
+    return json({ error: "Unknown action" }, 404, corsHeaders);
   } catch (error) {
-    return json({ error: error instanceof Error ? error.message : "Unexpected error" }, 500);
+    return json({ error: error instanceof Error ? error.message : "Unexpected error" }, 500, corsHeaders);
   }
 });
 
@@ -112,11 +128,29 @@ async function rejectBoth(reportId: string, existingId: string) {
   return { success: true };
 }
 
-function json(body: unknown, status = 200) {
+function json(body: unknown, status = 200, corsHeaders: Record<string, string>) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" }
   });
+}
+
+function getCorsHeaders(request: Request) {
+  const origin = request.headers.get("Origin") ?? "";
+  return {
+    ...baseCorsHeaders,
+    "Access-Control-Allow-Origin": allowedOrigins.has(origin) ? origin : fallbackOrigin
+  };
+}
+
+function constantTimeEquals(left: string, right: string) {
+  if (!left || !right) return false;
+  let diff = left.length ^ right.length;
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    diff |= left.charCodeAt(index % left.length) ^ right.charCodeAt(index % right.length);
+  }
+  return diff === 0;
 }
 
 function assertModerationStatus(value: string): asserts value is "flagged" | "approved" | "rejected" {

@@ -2,9 +2,11 @@ import { writeFile, mkdir } from "node:fs/promises";
 
 const outputDir = new URL("../public/", import.meta.url);
 const sourceUrl = process.env.SEED_SOURCE_SUPABASE_URL || "https://tcldazhypyuutdpoksfx.supabase.co";
-const sourceKey =
-  process.env.SEED_SOURCE_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjbGRhemh5cHl1dXRkcG9rc2Z4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyOTE5MzcsImV4cCI6MjA5MDg2NzkzN30.E6HWvErPgkTomXCuxunwwCBbDXsOZ4dVCQ2Bo7_BgAs";
+const sourceKey = process.env.SEED_SOURCE_SUPABASE_ANON_KEY;
+
+if (!sourceKey) {
+  throw new Error("Set SEED_SOURCE_SUPABASE_ANON_KEY before pulling seed data.");
+}
 
 await mkdir(outputDir, { recursive: true });
 

@@ -960,7 +960,7 @@ class SupabaseBackend extends LocalBackend {
     });
   }
 
-  override async resolveReport(_reportId: string, _input: ResolveReportInput) {
+  override async resolveReport(_reportId: string, _input: ResolveReportInput): Promise<GarbageReport> {
     throw new Error("Cleanup proof now requires moderator review before a report can be marked resolved.");
   }
 

@@ -15,7 +15,7 @@ const supabaseAnonKey =
   process.env.SUPABASE_ANON_KEY;
 const adminFunctionUrl =
   process.env.VITE_ADMIN_FUNCTION_URL || `${supabaseUrl.replace(/\/$/, "")}/functions/v1/admin-moderation`;
-const adminKey = process.env.SUPABASE_ADMIN_KEY || process.env.ADMIN_KEY || process.env.VITE_ADMIN_KEY;
+const adminKey = process.env.SUPABASE_ADMIN_KEY || process.env.ADMIN_KEY;
 
 const checks = [];
 
@@ -34,13 +34,22 @@ if (supabaseAnonKey) {
   await checkTable(supabase, "wards", "ward_number");
   await checkTable(supabase, "representatives", "id");
   await checkTable(supabase, "garbage_reports", "id");
+  await checkTable(supabase, "public_garbage_reports", "id");
 
-  await check("Report GPS datapoint columns are readable", async () => {
+  await check("Safe public report projection is readable", async () => {
+    const { error } = await supabase
+      .from("public_garbage_reports")
+      .select("id,latitude,longitude,location_source,ward_number,photo_url,moderation_status")
+      .limit(1);
+    if (error) throw error;
+  });
+
+  await check("Raw report GPS datapoint columns are not publicly readable", async () => {
     const { error } = await supabase
       .from("garbage_reports")
       .select("id,gps_latitude,gps_longitude,gps_accuracy_meters,gps_recorded_at,location_source")
       .limit(1);
-    if (error) throw error;
+    assert(Boolean(error), "raw GPS columns were readable with the public key");
   });
 
   await check("Storage bucket garbage-photos is reachable", async () => {
