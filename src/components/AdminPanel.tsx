@@ -353,6 +353,7 @@ function ModerationCard({
   const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
   const metadata = report.moderation_metadata ?? {};
   const reason = metadata.flag_reason || metadata.rejection_reason || "";
+  const isCleanupPending = metadata.cleanup_pending === true;
   const duplicate = reason === "potential_duplicate" && report._duplicate_original;
   const isNsfwPhoto = reason === "safesearch_failed";
   const photoUrl = fallbackPhotoFailed
@@ -442,6 +443,12 @@ function ModerationCard({
           {reason && <b>{reasonLabels[reason] ?? reason.replace(/_/g, " ")}</b>}
         </div>
       </div>
+      {isCleanupPending && (
+        <p className="cleanup-pending-box">
+          🧹 Cleanup proof submitted — citizen claims this spot has been cleaned.
+          Approve to mark as resolved and remove from map. Reject to keep active.
+        </p>
+      )}
       {duplicate && <p className="duplicate-box">Possible Duplicate — Compare with existing report before approving.</p>}
       <button className="details-toggle" onClick={() => setExpanded(!expanded)}>
         Moderation details

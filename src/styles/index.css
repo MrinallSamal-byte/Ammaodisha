@@ -3735,6 +3735,17 @@ button:focus-visible, a:focus-visible {
 
 .moderation-main b { background: #fff4d6; color: #8a5600; }
 
+.cleanup-pending-box {
+  margin: 6px 0 4px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.10);
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  color: #166534;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .duplicate-box {
   margin: 0 14px 12px;
   border: 1px solid #f7d889;
@@ -4233,4 +4244,17 @@ button:focus-visible, a:focus-visible {
   button:not(:disabled):active { transform: none; }
 
   .map-ward-tap-chip { animation: none !important; opacity: 1; transform: translateX(-50%); }
+}
+
+/* ── Cleanup proof pending banner ─────────────────────────────────────── */
+.cleanup-pending-box {
+  margin: 6px 0 4px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.10);
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  color: #166534;
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 500;
 }

@@ -170,4 +170,5 @@ export interface Backend {
   bulkModerate(adminKey: string, reportIds: string[], decision: ModerationStatus): Promise<void>;
   swapDuplicate(adminKey: string, reportId: string, existingId: string): Promise<void>;
   rejectBoth(adminKey: string, reportId: string, existingId: string): Promise<void>;
+  subscribeToChanges(callback: () => void): () => void;
 }

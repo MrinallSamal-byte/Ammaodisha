@@ -8,3 +8,5 @@ test-results
 .env.local
 .agents/
 skills-lock.json
+.vercel
+.env*.local

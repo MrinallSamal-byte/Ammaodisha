@@ -431,6 +431,13 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
     return next;
   }, [filteredReports, sortBy]);
 
+  // Map only shows unresolved reports — resolved ones are removed from the map
+  // after admin approves a cleanup, but remain visible in the list view.
+  const mapReports = useMemo(
+    () => visibleReports.filter((report) => report.status !== "resolved"),
+    [visibleReports]
+  );
+
   const unresolved = reports.filter((report) => report.status !== "resolved");
   const resolved = reports.filter((report) => report.status === "resolved");
   const worstWards = useMemo(() => getWorstWards(filteredReports, data.wards), [filteredReports, data.wards]);
@@ -584,7 +591,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
           }
         >
           <MapView
-            reports={visibleReports}
+            reports={mapReports}
             cityBoundary={data.cityBoundary}
             wardBoundaries={data.wardBoundaries}
             onSelectReport={handleMapReportSelect}
@@ -1697,8 +1704,11 @@ function ReportDetail({
             <div className="notice info pending-review-notice" role="status">
               <ShieldCheck size={16} />
               <span>
-                <strong>Pending review</strong>
-                Visible to you now. It becomes public once the photo is approved.
+                {report.moderation_metadata?.cleanup_pending ? (
+                  <><strong>Cleanup proof submitted</strong> Admin is reviewing your cleanup photo. The report will be marked resolved once approved.</>
+                ) : (
+                  <><strong>Pending review</strong> Visible to you now. It becomes public once the photo is approved.</>
+                )}
               </span>
             </div>
           )}
@@ -1775,11 +1785,11 @@ function ReportDetail({
             </div>
             {report.status !== "resolved" && (
               <div className="resolve-action-group">
-                <button className="green-action" disabled title="Cleanup proof requires moderator review">
+                <button className="green-action" onClick={() => setShowResolve(true)}>
                   <CheckCircle2 size={16} />
-                  Cleanup Review
+                  Submit Cleanup Proof
                 </button>
-                <small>Cleanup proof is being moved behind moderator review before reports can be marked resolved.</small>
+                <small>You must be at the spot. Take a photo as proof — admin will review before the report is marked cleaned.</small>
               </div>
             )}
           </div>
@@ -1929,9 +1939,11 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
     setUploadProgress(photo ? 0 : null);
     try {
       const photoUrl = photo ? await backend.uploadReportPhoto(photo, { onProgress: setUploadProgress }) : null;
-      const resolved = await backend.resolveReport(report.id, { photoUrl, lat: verifiedPosition.lat, lng: verifiedPosition.lng });
+      const delta = await backend.resolveReport(report.id, { photoUrl, lat: verifiedPosition.lat, lng: verifiedPosition.lng });
       navigator.vibrate?.(35);
-      onResolved(resolved);
+      // Spread the delta over the original full report so the UI keeps address,
+      // photo_url, severity, etc. while reflecting the updated cleanup/status fields.
+      onResolved({ ...report, ...delta });
       onClose();
     } catch (caught) {
       setUploadProgress(null);

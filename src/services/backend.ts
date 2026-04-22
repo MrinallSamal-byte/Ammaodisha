@@ -851,6 +851,10 @@ class LocalBackend implements Backend {
     await this.bulkModerate(adminKey, [reportId, existingId], "rejected");
   }
 
+  subscribeToChanges(_callback: () => void): () => void {
+    return () => {};
+  }
+
   private assertAdmin(adminKey: string) {
     if (!adminKey || !localAdminKey || adminKey !== localAdminKey) throw new Error("Invalid admin key");
   }
@@ -1026,10 +1030,37 @@ class SupabaseBackend extends LocalBackend {
     });
   }
 
-  override async resolveReport(_reportId: string, _input: ResolveReportInput): Promise<GarbageReport> {
-    void _reportId;
-    void _input;
-    throw new Error("Cleanup proof now requires moderator review before a report can be marked resolved.");
+  override async resolveReport(reportId: string, input: ResolveReportInput): Promise<GarbageReport> {
+    const { error } = await this.client.rpc("submit_cleanup_proof", {
+      p_report_id: reportId,
+      p_photo_url: input.photoUrl ?? null,
+      p_lat: input.lat,
+      p_lng: input.lng
+    });
+    if (error) throw error;
+    // Return a minimal delta — the caller (ResolveModal) will spread this
+    // over the original full report object to keep all original fields intact.
+    return {
+      id: reportId,
+      latitude: input.lat,
+      longitude: input.lng,
+      ward_number: 0,
+      address: "",
+      severity: "medium",
+      category: "mixed",
+      status: "unresolved",
+      upvote_count: 1,
+      created_at: new Date().toISOString(),
+      moderation_status: "flagged",
+      resolved_photo_url: input.photoUrl ?? null,
+      resolved_lat: input.lat,
+      resolved_lng: input.lng,
+      moderation_metadata: {
+        flag_reason: "cleanup_submitted",
+        cleanup_pending: true,
+        cleanup_submitted_at: new Date().toISOString()
+      }
+    } as GarbageReport;
   }
 
   override async upvoteReport(reportId: string) {
@@ -1092,6 +1123,20 @@ class SupabaseBackend extends LocalBackend {
 
   override async rejectBoth(adminKey: string, reportId: string, existingId: string) {
     await this.callAdmin(adminKey, "reject_both", { reportId, existingId });
+  }
+
+  override subscribeToChanges(callback: () => void): () => void {
+    const channel = this.client
+      .channel("garbage-report-changes")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "garbage_reports" },
+        () => void callback()
+      )
+      .subscribe();
+    return () => {
+      void this.client.removeChannel(channel);
+    };
   }
 
   private async callAdmin<T = unknown>(adminKey: string, action: string, body?: unknown): Promise<T> {

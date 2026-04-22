@@ -38,10 +38,30 @@ export default function App() {
   // has its own data loading and does not depend on CivicData.
   useEffect(() => {
     if (isAdmin) return;
+
+    let cancelled = false;
+
     backend
       .fetchCivicData()
       .then(setData)
       .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load civic data."));
+
+    // Subscribe to DB changes so admin approve/reject decisions and cleanup
+    // approvals are reflected on the public map without a manual refresh.
+    const unsubscribe = backend.subscribeToChanges(() => {
+      if (cancelled) return;
+      backend
+        .fetchReports()
+        .then((nextReports) => {
+          if (!cancelled) setData((prev) => (prev ? { ...prev, reports: nextReports } : prev));
+        })
+        .catch(() => { /* silent — stale data is better than a crash */ });
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [isAdmin]);
 
   useEffect(() => {

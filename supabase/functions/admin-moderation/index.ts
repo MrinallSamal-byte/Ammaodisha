@@ -101,11 +101,28 @@ async function queue(status: string) {
 
 async function moderate(reportId: string, decision: string) {
   assertModerationStatus(decision);
+
+  // When approving a cleanup-proof submission, also mark the report resolved
+  const extraFields: Record<string, unknown> = {};
+  if (decision === "approved") {
+    const { data: existing } = await supabase
+      .from("garbage_reports")
+      .select("moderation_metadata")
+      .eq("id", reportId)
+      .maybeSingle();
+    const meta = (existing?.moderation_metadata ?? {}) as Record<string, unknown>;
+    if (meta.cleanup_pending === true) {
+      extraFields.status = "resolved";
+      extraFields.resolved_at = new Date().toISOString();
+    }
+  }
+
   const { error } = await supabase
     .from("garbage_reports")
     .update({
       moderation_status: decision,
-      moderation_metadata: { moderated_at: new Date().toISOString(), decision_source: "admin" }
+      moderation_metadata: { moderated_at: new Date().toISOString(), decision_source: "admin" },
+      ...extraFields
     })
     .eq("id", reportId);
   if (error) throw error;
