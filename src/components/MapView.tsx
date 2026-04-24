@@ -15,6 +15,7 @@ interface MapViewProps {
   focusWardNumber: number | null;
   focusRequestId: number;
   onMapReady?: () => void;
+  totalReportCount?: number;
 }
 
 interface ReportPointProperties {
@@ -64,6 +65,7 @@ const WARD_LINE_LAYER_ID = "wards-line";
 const WARD_LABEL_LAYER_ID = "wards-label";
 const CLUSTER_HINT_KEY = "nk_cluster_hint_seen";
 const FRESH_REPORT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const MAP_LEGEND_SEVERITIES: GarbageReport["severity"][] = ["small", "medium", "large", "massive"];
 
 function shouldShowClusterHint() {
   try {
@@ -178,7 +180,8 @@ export function MapView({
   onSelectWard,
   focusWardNumber,
   focusRequestId,
-  onMapReady
+  onMapReady,
+  totalReportCount
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -198,6 +201,7 @@ export function MapView({
   const wardRenderData = useMemo(() => createWardRenderData(reports, wardBoundaries), [reports, wardBoundaries]);
   const coverageData = useMemo(() => createCoverageData(wardBoundaries, cityBoundary), [cityBoundary, wardBoundaries]);
   const activeReportCount = useMemo(() => reports.filter((report) => report.status !== "resolved").length, [reports]);
+  const visibleReportCount = totalReportCount ?? reports.length;
 
   useEffect(() => {
     onSelectReportRef.current = onSelectReport;
@@ -573,9 +577,18 @@ export function MapView({
         </span>
         <i aria-hidden="true" />
         <span>
-          <strong>{reports.length}</strong>
+          <strong>{visibleReportCount}</strong>
           Reports
         </span>
+      </div>
+      <div className="map-legend" aria-label="Map severity legend">
+        <span>Severity</span>
+        {MAP_LEGEND_SEVERITIES.map((severityKey) => (
+          <em key={severityKey}>
+            <i style={{ background: SEVERITY[severityKey].color }} aria-hidden="true" />
+            {SEVERITY[severityKey].label}
+          </em>
+        ))}
       </div>
       {hoverWard && (
         <div className="map-ward-tooltip" aria-hidden="true">

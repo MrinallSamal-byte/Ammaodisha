@@ -329,6 +329,51 @@ button:focus-visible, a:focus-visible {
   background: var(--line);
 }
 
+.map-legend {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  background: var(--surface-glass-dense);
+  color: var(--text-muted);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  pointer-events: none;
+}
+
+.map-legend span {
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.map-legend em {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.map-legend i {
+  width: 9px;
+  height: 9px;
+  border: 2px solid #ffffff;
+  border-radius: var(--radius-pill);
+  box-shadow: 0 0 0 1px rgb(15 23 32 / 10%);
+}
+
 .map-ward-tooltip {
   position: absolute;
   left: 14px;
@@ -447,6 +492,14 @@ button:focus-visible, a:focus-visible {
 .map-empty-state svg { color: var(--primary); }
 .map-empty-state strong { color: var(--text-strong); font-size: 14px; }
 .map-empty-state span { font-size: 12px; line-height: 1.4; }
+.map-empty-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .map-empty-state button {
   min-height: 36px;
   border-radius: var(--radius-sm);
@@ -455,6 +508,12 @@ button:focus-visible, a:focus-visible {
   color: var(--primary-deep);
   font-size: 12px;
   font-weight: 900;
+}
+
+.map-empty-state .secondary-map-action {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text-muted);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -2412,6 +2471,94 @@ button:focus-visible, a:focus-visible {
 .accountability-card h3 { margin: 0 0 7px; color: var(--text-strong); font-size: 15px; font-weight: 900; }
 .accountability-card p { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
 
+.priority-queue {
+  display: grid;
+  gap: 6px;
+  margin-top: 16px;
+}
+
+.priority-report-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 58px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  padding: 9px 10px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition-smooth), transform var(--transition-fast), box-shadow var(--transition-smooth);
+}
+
+.priority-report-row:hover {
+  border-color: rgb(227 27 35 / 22%);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.priority-report-severity {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+}
+
+.priority-report-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.priority-report-main strong,
+.priority-report-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.priority-report-main strong {
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.priority-report-main small {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.priority-report-score {
+  min-width: 48px;
+  text-align: right;
+}
+
+.priority-report-score strong,
+.priority-report-score small {
+  display: block;
+}
+
+.priority-report-score strong {
+  color: var(--primary);
+  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.priority-report-score small {
+  margin-top: 3px;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 900;
+}
+
 .leaderboard { display: grid; gap: 4px; margin-top: 16px; }
 
 .ward-bar-row {
@@ -4158,6 +4305,17 @@ button:focus-visible, a:focus-visible {
   .detect-ward-action { min-height: 52px; }
 
   .map-stats-pill { top: 10px; left: 10px; padding: 6px 10px; }
+  .map-legend {
+    top: 50px;
+    right: auto;
+    left: 10px;
+    max-width: calc(100vw - 20px);
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 8px;
+  }
+  .map-legend span { display: none; }
+  .map-legend em { font-size: 10px; }
 
   .control-alert-stack { top: calc(var(--safe-top) + var(--top-controls-height) + 10px); left: 10px; width: calc(100vw - 20px); }
 

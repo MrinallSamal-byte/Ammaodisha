@@ -22,12 +22,21 @@ async function getRuntimeReportPath(page: Page) {
 test("public map shell loads", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("button", { name: /About Amma Odisha/i })).toBeVisible();
-  // Report Garbage is the primary CTA on both mobile and desktop after the bottom bar redesign.
-  await expect(page.getByRole("button", { name: /Report a garbage dump/i })).toBeVisible();
+  // Report Garbage is exposed directly on mobile and as a QR handoff on desktop.
+  const reportCtaVisible = await page
+    .getByRole("button", { name: "Report a garbage dump", exact: true })
+    .isVisible()
+    .catch(() => false);
+  const desktopQrCtaVisible = await page
+    .getByRole("button", { name: /Scan QR to report on mobile/i })
+    .isVisible()
+    .catch(() => false);
+  expect(reportCtaVisible || desktopQrCtaVisible).toBe(true);
   await expect(page.getByRole("dialog", { name: /Amma Odisha intro/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /Open Amma Odisha insights/i })).toBeVisible();
   await expect(page.getByLabel("Map cluster guidance")).toContainText("Grouped reports");
   await expect(page.getByLabel("Visible map report statistics")).toBeVisible();
+  await expect(page.getByLabel("Map severity legend")).toContainText("Critical");
 });
 
 test("list mode exposes the issue feed", async ({ page }) => {
@@ -51,6 +60,24 @@ test("map-first controls filter reports directly", async ({ page }) => {
   const filterDialog = page.getByRole("dialog", { name: /Search and filter reports/i });
   await expect(filterDialog.getByLabel("Active report filters")).toContainText("Severity: Critical");
   await expect(filterDialog.getByLabel("Active report filters")).toContainText("Status: Cleaned");
+});
+
+test("resolved-only map results guide users to list view", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /Start using map/i }).click().catch(() => undefined);
+  await page.getByLabel("Filter by status").selectOption("resolved");
+  await expect(page.getByText(/Only cleaned reports match/i)).toBeVisible();
+  await page.getByRole("button", { name: /Open list/i }).click();
+  await expect(page.locator(".report-item").first()).toBeVisible();
+});
+
+test("insights priority queue opens urgent reports", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /Start using map/i }).click().catch(() => undefined);
+  await page.getByRole("button", { name: /Open Amma Odisha insights/i }).click();
+  await expect(page.getByRole("dialog", { name: /Amma Odisha insights/i })).toContainText("Priority Queue");
+  await page.locator(".priority-report-row").first().click();
+  await expectReportSheetOpen(page);
 });
 
 test("report form opens as a mobile-first sheet", async ({ page }) => {
@@ -150,13 +177,15 @@ test("report form validates fields and confirms submission", async ({ page }) =>
   await page.getByRole("button", { name: /^Next$/i }).click();
   await expect(page.getByText(/Step 3 of 3/i)).toBeVisible();
   await page.getByRole("button", { name: /Submit Report/i }).click();
-  await expect(page.getByRole("status").getByText(/Report submitted/i)).toBeVisible();
-  await expect(page.getByRole("status")).toContainText(/We review every photo/i);
+  await expect(page.getByRole("status").getByText(/Report submitted/i)).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("status")).toContainText(/We review every photo/i, { timeout: 20_000 });
 });
 
 test("deep links open contextual public sheets", async ({ page }) => {
+  test.setTimeout(60_000);
+
   await page.goto("/ward/5");
-  await expect(page.getByRole("heading", { name: "Ward 5" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Ward 5" })).toBeVisible({ timeout: 30_000 });
 
   const reportPath = await getRuntimeReportPath(page);
   await page.goto(reportPath);

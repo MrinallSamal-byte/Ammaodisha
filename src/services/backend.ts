@@ -14,6 +14,7 @@ import type {
   Representative,
   ResolveReportInput,
   UploadReportPhotoOptions,
+  UploadReportPhotoResult,
   Ward,
   WardFeatureCollection
 } from "../types/domain";
@@ -92,6 +93,12 @@ function isMissingPublicReportSurface(error: unknown) {
   const code = (error as { code?: string }).code;
   const message = error instanceof Error ? error.message : String((error as { message?: string }).message ?? error);
   return code === "42P01" || message.includes(PUBLIC_REPORTS_VIEW);
+}
+
+function isMissingSchemaColumn(error: unknown, column: string) {
+  const code = (error as { code?: string }).code;
+  const message = error instanceof Error ? error.message : String((error as { message?: string }).message ?? error);
+  return code === "PGRST204" && message.includes(`'${column}'`);
 }
 
 async function fetchJson<T>(url: string, timeoutMs = 30_000): Promise<T> {
@@ -336,6 +343,7 @@ function addReportImageAttribution(report: GarbageReport, image: ReportImageRepl
   return {
     ...report,
     photo_url: image.photo_url,
+    photo_thumb_url: image.photo_url,
     photo_source_url: image.source_page ?? report.photo_source_url ?? null,
     photo_source_title: image.title ?? report.photo_source_title ?? null,
     photo_license: image.license ?? report.photo_license ?? null,
@@ -551,6 +559,11 @@ function reportUploadProgress(options: UploadReportPhotoOptions | undefined, val
   options?.onProgress?.(Math.max(0, Math.min(100, Math.round(value))));
 }
 
+const REPORT_IMAGE_MAX_DIMENSION = 960;
+const REPORT_IMAGE_QUALITY = 0.72;
+const REPORT_THUMBNAIL_MAX_DIMENSION = 220;
+const REPORT_THUMBNAIL_QUALITY = 0.62;
+
 async function fileToDataUrl(file: File, options?: UploadReportPhotoOptions): Promise<string> {
   reportUploadProgress(options, 0);
   return new Promise((resolve, reject) => {
@@ -568,7 +581,43 @@ async function fileToDataUrl(file: File, options?: UploadReportPhotoOptions): Pr
   });
 }
 
-async function compressImage(file: File): Promise<File> {
+async function fileToUploadResult(file: File, options?: UploadReportPhotoOptions): Promise<UploadReportPhotoResult> {
+  reportUploadProgress(options, 0);
+  const full = await compressImage(file, {
+    maxDimension: REPORT_IMAGE_MAX_DIMENSION,
+    quality: REPORT_IMAGE_QUALITY
+  });
+  reportUploadProgress(options, 35);
+  const thumbnail = await compressImage(file, {
+    maxDimension: REPORT_THUMBNAIL_MAX_DIMENSION,
+    quality: REPORT_THUMBNAIL_QUALITY
+  });
+  reportUploadProgress(options, 55);
+  const url = await fileToDataUrl(full);
+  reportUploadProgress(options, 80);
+  const thumbUrl = thumbnail.size < full.size ? await fileToDataUrl(thumbnail) : url;
+  reportUploadProgress(options, 100);
+  return { url, thumbUrl };
+}
+
+function getStorageExtension(file: File) {
+  if (file.type === "image/png") return "png";
+  if (file.type === "image/webp") return "webp";
+  if (file.type === "image/heic") return "heic";
+  if (file.type === "image/heif") return "heif";
+  return "jpg";
+}
+
+async function compressImage(
+  file: File,
+  {
+    maxDimension,
+    quality
+  }: {
+    maxDimension: number;
+    quality: number;
+  }
+): Promise<File> {
   if (!file.type.startsWith("image/") || file.type.includes("heic") || file.type.includes("heif")) return file;
 
   return new Promise((resolve) => {
@@ -577,10 +626,14 @@ async function compressImage(file: File): Promise<File> {
     image.onload = () => {
       URL.revokeObjectURL(url);
       let { width, height } = image;
-      const max = 1200;
-      if (width > max || height > max) {
-        if (width > height) { height = Math.round(height * (max / width)); width = max; }
-        else { width = Math.round(width * (max / height)); height = max; }
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = Math.round(height * (maxDimension / width));
+          width = maxDimension;
+        } else {
+          width = Math.round(width * (maxDimension / height));
+          height = maxDimension;
+        }
       }
       const canvas = document.createElement("canvas");
       canvas.width = width;
@@ -594,7 +647,7 @@ async function compressImage(file: File): Promise<File> {
           resolve(new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg", lastModified: Date.now() }));
         },
         "image/jpeg",
-        0.75
+        quality
       );
     };
     image.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
@@ -607,13 +660,17 @@ function uploadStorageObjectWithProgress({
   contentType,
   file,
   options,
-  path
+  path,
+  progressEnd = 99,
+  progressStart = 5
 }: {
   bucket: string;
   contentType: string;
   file: File;
   options?: UploadReportPhotoOptions;
   path: string;
+  progressEnd?: number;
+  progressStart?: number;
 }) {
   const encodedPath = path.split("/").map(encodeURIComponent).join("/");
   const url = `${supabaseUrl}/storage/v1/object/${bucket}/${encodedPath}`;
@@ -623,18 +680,18 @@ function uploadStorageObjectWithProgress({
     request.open("POST", url);
     request.setRequestHeader("Authorization", `Bearer ${supabaseAnonKey}`);
     request.setRequestHeader("apikey", supabaseAnonKey!);
-    request.setRequestHeader("Cache-Control", "3600");
+    request.setRequestHeader("Cache-Control", "31536000");
     request.setRequestHeader("Content-Type", contentType);
     request.setRequestHeader("x-upsert", "false");
 
     request.upload.onprogress = (event) => {
       if (!event.lengthComputable) return;
-      reportUploadProgress(options, 5 + (event.loaded / event.total) * 94);
+      reportUploadProgress(options, progressStart + (event.loaded / event.total) * (progressEnd - progressStart));
     };
 
     request.onload = () => {
       if (request.status >= 200 && request.status < 300) {
-        reportUploadProgress(options, 100);
+        reportUploadProgress(options, progressEnd);
         resolve();
         return;
       }
@@ -650,7 +707,7 @@ function uploadStorageObjectWithProgress({
     request.onerror = () => reject(new Error("Photo upload failed. Check your connection and try again."));
     request.onabort = () => reject(new Error("Photo upload was cancelled."));
 
-    reportUploadProgress(options, 1);
+    reportUploadProgress(options, progressStart);
     request.send(file);
   });
 }
@@ -760,6 +817,7 @@ class LocalBackend implements Backend {
       status: "resolved",
       resolved_at: new Date().toISOString(),
       resolved_photo_url: input.photoUrl ?? null,
+      resolved_photo_thumb_url: input.photoThumbUrl ?? null,
       resolved_lat: input.lat,
       resolved_lng: input.lng,
       resolved_by_name: input.name || "Anonymous Citizen",
@@ -786,7 +844,7 @@ class LocalBackend implements Backend {
   }
 
   async uploadReportPhoto(file: File, options?: UploadReportPhotoOptions) {
-    return fileToDataUrl(file, options);
+    return fileToUploadResult(file, options);
   }
 
   async adminStats(adminKey: string) {
@@ -851,7 +909,8 @@ class LocalBackend implements Backend {
     await this.bulkModerate(adminKey, [reportId, existingId], "rejected");
   }
 
-  subscribeToChanges(_callback: () => void): () => void {
+  subscribeToChanges(callback: () => void): () => void {
+    void callback;
     return () => {};
   }
 
@@ -1010,11 +1069,19 @@ class SupabaseBackend extends LocalBackend {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const payload = { ...input, id, is_test: IS_STAGING };
-    const { error } = await this.client.from("garbage_reports").insert(payload);
+    let submittedInput = input;
+    let { error } = await this.client.from("garbage_reports").insert(payload);
+    if (error && isMissingSchemaColumn(error, "photo_thumb_url")) {
+      const legacyInput = { ...input };
+      delete legacyInput.photo_thumb_url;
+      const legacyPayload = { ...legacyInput, id, is_test: IS_STAGING };
+      ({ error } = await this.client.from("garbage_reports").insert(legacyPayload));
+      submittedInput = legacyInput;
+    }
     if (error) throw error;
     recordSubmission();
     return normalizeReport({
-      ...input,
+      ...submittedInput,
       id,
       status: "unresolved",
       created_at: now,
@@ -1034,6 +1101,7 @@ class SupabaseBackend extends LocalBackend {
     const { error } = await this.client.rpc("submit_cleanup_proof", {
       p_report_id: reportId,
       p_photo_url: input.photoUrl ?? null,
+      p_photo_thumb_url: input.photoThumbUrl ?? null,
       p_lat: input.lat,
       p_lng: input.lng
     });
@@ -1053,6 +1121,7 @@ class SupabaseBackend extends LocalBackend {
       created_at: new Date().toISOString(),
       moderation_status: "flagged",
       resolved_photo_url: input.photoUrl ?? null,
+      resolved_photo_thumb_url: input.photoThumbUrl ?? null,
       resolved_lat: input.lat,
       resolved_lng: input.lng,
       moderation_metadata: {
@@ -1085,18 +1154,46 @@ class SupabaseBackend extends LocalBackend {
 
   override async uploadReportPhoto(file: File, options?: UploadReportPhotoOptions) {
     reportUploadProgress(options, 0);
-    const compressed = await compressImage(file);
-    reportUploadProgress(options, 5);
-    const name = `${crypto.randomUUID()}.jpg`;
-    const path = `reports/${name}`;
+    const compressed = await compressImage(file, {
+      maxDimension: REPORT_IMAGE_MAX_DIMENSION,
+      quality: REPORT_IMAGE_QUALITY
+    });
+    reportUploadProgress(options, 6);
+    const thumbnail = await compressImage(file, {
+      maxDimension: REPORT_THUMBNAIL_MAX_DIMENSION,
+      quality: REPORT_THUMBNAIL_QUALITY
+    });
+    reportUploadProgress(options, 10);
+    const id = crypto.randomUUID();
+    const path = `reports/${id}.${getStorageExtension(compressed)}`;
     await uploadStorageObjectWithProgress({
       bucket: "garbage-photos",
       contentType: compressed.type || "image/jpeg",
       file: compressed,
       options,
-      path
+      path,
+      progressEnd: 82,
+      progressStart: 10
     });
-    return this.client.storage.from("garbage-photos").getPublicUrl(path).data.publicUrl;
+    const url = this.client.storage.from("garbage-photos").getPublicUrl(path).data.publicUrl;
+    let thumbUrl: string | null = null;
+
+    if (thumbnail.size < compressed.size) {
+      const thumbnailPath = `reports/thumbs/${id}.${getStorageExtension(thumbnail)}`;
+      await uploadStorageObjectWithProgress({
+        bucket: "garbage-photos",
+        contentType: thumbnail.type || "image/jpeg",
+        file: thumbnail,
+        options,
+        path: thumbnailPath,
+        progressEnd: 99,
+        progressStart: 82
+      });
+      thumbUrl = this.client.storage.from("garbage-photos").getPublicUrl(thumbnailPath).data.publicUrl;
+    }
+
+    reportUploadProgress(options, 100);
+    return { url, thumbUrl };
   }
 
   override async adminStats(adminKey: string) {
@@ -1130,7 +1227,12 @@ class SupabaseBackend extends LocalBackend {
       .channel("garbage-report-changes")
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "garbage_reports" },
+        { event: "*", schema: "public", table: "garbage_reports" },
+        () => void callback()
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "report_upvotes" },
         () => void callback()
       )
       .subscribe();

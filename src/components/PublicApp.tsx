@@ -65,6 +65,12 @@ const SEVERITY_FILTER_OPTIONS: { key: "all" | SeverityKey; label: string }[] = [
   { key: "large", label: "Serious (5-20m²)" },
   { key: "massive", label: "Critical (20m²+)" }
 ];
+const SEVERITY_PRIORITY: Record<SeverityKey, number> = {
+  small: 1,
+  medium: 2,
+  large: 3,
+  massive: 4
+};
 
 type RouteSelection =
   | { type: "report"; id: string }
@@ -404,6 +410,30 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
     }
   }, [reports, routeSelection, routeState]);
 
+  const representativeSearchByWard = useMemo(() => {
+    const mlaByConstituency = new Map<string, Representative>();
+    const mpByConstituency = new Map<string, Representative>();
+
+    data.representatives.forEach((rep) => {
+      if (rep.role === "mla") mlaByConstituency.set(rep.constituency, rep);
+      if (rep.role === "mp") mpByConstituency.set(rep.constituency, rep);
+    });
+
+    return new Map(
+      data.wards.map((ward) => {
+        const reps = [
+          mlaByConstituency.get(ward.assembly_constituency),
+          mpByConstituency.get(ward.parliamentary_constituency)
+        ]
+          .filter((rep): rep is Representative => Boolean(rep))
+          .map((rep) => `${rep.name} ${rep.party} ${rep.constituency}`)
+          .join(" ");
+
+        return [ward.ward_number, reps];
+      })
+    );
+  }, [data.representatives, data.wards]);
+
   const filteredReports = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return reports.filter((report) => {
@@ -412,10 +442,25 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
       if (wardFilterNumber != null && report.ward_number !== wardFilterNumber) return false;
       if (!query) return true;
       const ward = wardsByNumber.get(report.ward_number);
-      const haystack = `${report.address} ${ward?.ward_name ?? ""} ward ${report.ward_number}`.toLowerCase();
+      const haystack = [
+        report.address,
+        `ward ${report.ward_number}`,
+        ward?.ward_name,
+        ward?.locality_name,
+        ward?.zone,
+        ward?.assembly_constituency,
+        ward?.parliamentary_constituency,
+        CATEGORIES[report.category],
+        SEVERITY[report.severity]?.label,
+        STATUS_LABELS[report.status],
+        representativeSearchByWard.get(report.ward_number)
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
       return haystack.includes(query);
     });
-  }, [reports, severityFilter, statusFilter, wardFilterNumber, searchQuery, wardsByNumber]);
+  }, [reports, representativeSearchByWard, searchQuery, severityFilter, statusFilter, wardFilterNumber, wardsByNumber]);
 
   const visibleReports = useMemo(() => {
     const next = [...filteredReports];
@@ -438,8 +483,15 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
     [visibleReports]
   );
 
-  const unresolved = reports.filter((report) => report.status !== "resolved");
-  const resolved = reports.filter((report) => report.status === "resolved");
+  const { unresolved, resolved } = useMemo(() => {
+    const nextUnresolved: GarbageReport[] = [];
+    const nextResolved: GarbageReport[] = [];
+    reports.forEach((report) => {
+      if (report.status === "resolved") nextResolved.push(report);
+      else nextUnresolved.push(report);
+    });
+    return { unresolved: nextUnresolved, resolved: nextResolved };
+  }, [reports]);
   const worstWards = useMemo(() => getWorstWards(filteredReports, data.wards), [filteredReports, data.wards]);
   const filteredWard = wardFilterNumber != null ? wardsByNumber.get(wardFilterNumber) : null;
   const hasActiveFilters =
@@ -537,6 +589,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
     setStatusFilter("all");
     setWardFilterNumber(null);
     setSearchQuery("");
+    setSortBy("newest");
     setWardFilterState("idle");
   }, []);
 
@@ -580,6 +633,19 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
     [focusWardOnMap, navigate]
   );
 
+  const showMapEmptyState = viewMode === "map" && mapReports.length === 0;
+  const mapEmptyHasListResults = visibleReports.length > 0;
+  const mapEmptyTitle = mapEmptyHasListResults
+    ? "Only cleaned reports match"
+    : hasActiveFilters
+      ? "No reports match your filters"
+      : "No active reports visible yet";
+  const mapEmptyDescription = mapEmptyHasListResults
+    ? "Resolved reports stay in the issue feed so the map stays focused on active garbage spots."
+    : hasActiveFilters
+      ? "Clear filters to bring active map markers back."
+      : "New approved reports will appear here as active map markers.";
+
   return (
     <div className="app-frame">
       {viewMode === "map" && (
@@ -599,6 +665,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
             focusWardNumber={focusWardNumber}
             focusRequestId={focusRequestId}
             onMapReady={() => setMapLoaded(true)}
+            totalReportCount={visibleReports.length}
           />
         </Suspense>
       )}
@@ -763,14 +830,27 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
         />
       )}
 
-      {viewMode === "map" && visibleReports.length === 0 && (
+      {showMapEmptyState && (
         <div className="map-empty-state" role="status">
           <Search size={18} />
-          <strong>{hasActiveFilters ? "No reports match your filters" : "No reports visible yet"}</strong>
-          <span>{hasActiveFilters ? "Clear filters to bring the map back." : "Reports appear here after they are synced or approved."}</span>
-          <button type="button" onClick={hasActiveFilters ? clearFilters : () => setShowReportForm(true)}>
-            {hasActiveFilters ? "Clear filters" : "Report garbage"}
-          </button>
+          <strong>{mapEmptyTitle}</strong>
+          <span>{mapEmptyDescription}</span>
+          <div className="map-empty-actions">
+            {mapEmptyHasListResults ? (
+              <button type="button" onClick={() => setViewMode("list")}>
+                Open list
+              </button>
+            ) : (
+              <button type="button" onClick={hasActiveFilters ? clearFilters : () => setShowReportForm(true)}>
+                {hasActiveFilters ? "Clear filters" : "Report garbage"}
+              </button>
+            )}
+            {mapEmptyHasListResults && (
+              <button className="secondary-map-action" type="button" onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -883,6 +963,10 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
           resolvedCount={resolved.length}
           worstWards={worstWards}
           onClose={() => setShowInsights(false)}
+          onOpenReport={(report) => {
+            setShowInsights(false);
+            handleMapReportSelect(report);
+          }}
           onOpenWard={(wardNumber) => {
             setShowInsights(false);
             focusWardOnMap(wardNumber);
@@ -1129,6 +1213,7 @@ function InsightsSheet({
   resolvedCount,
   worstWards,
   onClose,
+  onOpenReport,
   onOpenWard
 }: {
   reports: GarbageReport[];
@@ -1138,9 +1223,22 @@ function InsightsSheet({
   resolvedCount: number;
   worstWards: ReturnType<typeof getWorstWards>;
   onClose: () => void;
+  onOpenReport: (report: GarbageReport) => void;
   onOpenWard: (wardNumber: number) => void;
 }) {
   const activeShare = Math.round((unresolvedCount / Math.max(1, reports.length)) * 100);
+  const priorityReports = useMemo(() => {
+    return visibleReports
+      .filter((report) => report.status !== "resolved")
+      .sort((a, b) => {
+        const severityDelta = SEVERITY_PRIORITY[b.severity] - SEVERITY_PRIORITY[a.severity];
+        if (severityDelta !== 0) return severityDelta;
+        const upvoteDelta = (b.upvote_count ?? 0) - (a.upvote_count ?? 0);
+        if (upvoteDelta !== 0) return upvoteDelta;
+        return daysActive(b.created_at) - daysActive(a.created_at);
+      })
+      .slice(0, 4);
+  }, [visibleReports]);
 
   return (
     <DialogSurface ariaLabel="Amma Odisha insights" className="insights-sheet" onClose={onClose}>
@@ -1171,6 +1269,43 @@ function InsightsSheet({
         <div className="accountability-card">
           <h3>How pressure builds</h3>
           <p>Citizens report a spot, others upvote it, and the issue stays visible with ward, MLA, and MP context until it is cleaned.</p>
+        </div>
+
+        <div className="priority-queue">
+          <div className="sheet-title-row compact">
+            <h3>Priority Queue</h3>
+            <span className="pill red">{priorityReports.length} active</span>
+          </div>
+          {priorityReports.length ? (
+            priorityReports.map((report) => {
+              const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
+              return (
+                <button
+                  className="priority-report-row"
+                  key={report.id}
+                  type="button"
+                  onClick={() => onOpenReport(report)}
+                  aria-label={`Open priority report in Ward ${report.ward_number}`}
+                >
+                  <span className="priority-report-severity" style={{ color: severity.color }}>
+                    <SeverityMark severityKey={report.severity} />
+                  </span>
+                  <span className="priority-report-main">
+                    <strong>{report.address}</strong>
+                    <small>
+                      Ward {report.ward_number} - {severity.label} - {daysActive(report.created_at)} days open
+                    </small>
+                  </span>
+                  <span className="priority-report-score">
+                    <strong>{report.upvote_count ?? 1}</strong>
+                    <small>upvotes</small>
+                  </span>
+                </button>
+              );
+            })
+          ) : (
+            <p className="empty">No active reports match this view.</p>
+          )}
         </div>
 
         <div className="leaderboard">
@@ -1375,10 +1510,13 @@ function ReportListItem({
     <button
       className="report-item"
       onClick={() => onSelect(report)}
+      onFocus={() => preloadImage(report.photo_url)}
+      onPointerEnter={() => preloadImage(report.photo_url)}
       aria-label={`${wardName || report.address} — ${severity.label} garbage, ${STATUS_LABELS[report.status]}, ${upvoteCount} ${upvoteCount === 1 ? "upvote" : "upvotes"}`}
     >
       <ReportPhoto
         src={report.photo_url}
+        thumbSrc={report.photo_thumb_url}
         alt=""
         variant="thumb"
         loading="lazy"
@@ -1407,11 +1545,23 @@ function ReportListItem({
   );
 }
 
+const preloadedImageUrls = new Set<string>();
+
+function preloadImage(src?: string | null) {
+  if (!src || preloadedImageUrls.has(src)) return;
+  preloadedImageUrls.add(src);
+  const image = new Image();
+  image.decoding = "async";
+  image.referrerPolicy = "no-referrer";
+  image.src = src;
+}
+
 function ReportPhoto({
   alt,
   height,
   loading,
   src,
+  thumbSrc,
   variant,
   width
 }: {
@@ -1419,24 +1569,32 @@ function ReportPhoto({
   height?: number | null;
   loading?: "eager" | "lazy";
   src?: string | null;
+  thumbSrc?: string | null;
   variant: "detail" | "thumb";
   width?: number | null;
 }) {
-  const [useFallback, setUseFallback] = useState(() => !src);
+  const preferredSrc = variant === "thumb" ? thumbSrc || src : src;
   const [fallbackFailed, setFallbackFailed] = useState(false);
+  const [candidateIndex, setCandidateIndex] = useState(0);
 
   useEffect(() => {
-    setUseFallback(!src);
+    setCandidateIndex(0);
     setFallbackFailed(false);
-  }, [src]);
+  }, [preferredSrc, src]);
 
-  const imageSrc = fallbackFailed
-    ? LOCAL_REPORT_PHOTO_FALLBACK_URL
-    : useFallback
-      ? ODISHA_GARBAGE_FALLBACK_IMAGE.photo_url
-      : src ?? ODISHA_GARBAGE_FALLBACK_IMAGE.photo_url;
-  const imageWidth = useFallback && !fallbackFailed ? ODISHA_GARBAGE_FALLBACK_IMAGE.width : width;
-  const imageHeight = useFallback && !fallbackFailed ? ODISHA_GARBAGE_FALLBACK_IMAGE.height : height;
+  const fallbackSrc = fallbackFailed ? LOCAL_REPORT_PHOTO_FALLBACK_URL : ODISHA_GARBAGE_FALLBACK_IMAGE.photo_url;
+  const candidates = useMemo(() => {
+    const next: string[] = [];
+    if (preferredSrc) next.push(preferredSrc);
+    if (src && src !== preferredSrc) next.push(src);
+    next.push(fallbackSrc);
+    return next;
+  }, [fallbackSrc, preferredSrc, src]);
+  const safeCandidateIndex = Math.min(candidateIndex, candidates.length - 1);
+  const imageSrc = candidates[safeCandidateIndex] ?? LOCAL_REPORT_PHOTO_FALLBACK_URL;
+  const usingRemoteFallback = imageSrc === ODISHA_GARBAGE_FALLBACK_IMAGE.photo_url;
+  const imageWidth = usingRemoteFallback ? ODISHA_GARBAGE_FALLBACK_IMAGE.width : width;
+  const imageHeight = usingRemoteFallback ? ODISHA_GARBAGE_FALLBACK_IMAGE.height : height;
 
   return (
     <img
@@ -1446,14 +1604,17 @@ function ReportPhoto({
       loading={loading ?? (variant === "thumb" ? "lazy" : "eager")}
       decoding="async"
       referrerPolicy="no-referrer"
+      sizes={variant === "thumb" ? "54px" : "(max-width: 640px) 100vw, 420px"}
       width={imageWidth ?? undefined}
       height={imageHeight ?? undefined}
       onError={() => {
-        if (useFallback) {
-          setFallbackFailed(true);
+        if (safeCandidateIndex < candidates.length - 1) {
+          setCandidateIndex((index) => Math.min(index + 1, candidates.length - 1));
           return;
         }
-        setUseFallback(true);
+        if (!fallbackFailed) {
+          setFallbackFailed(true);
+        }
       }}
     />
   );
@@ -1938,8 +2099,13 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
     setStatus("saving");
     setUploadProgress(photo ? 0 : null);
     try {
-      const photoUrl = photo ? await backend.uploadReportPhoto(photo, { onProgress: setUploadProgress }) : null;
-      const delta = await backend.resolveReport(report.id, { photoUrl, lat: verifiedPosition.lat, lng: verifiedPosition.lng });
+      const upload = photo ? await backend.uploadReportPhoto(photo, { onProgress: setUploadProgress }) : null;
+      const delta = await backend.resolveReport(report.id, {
+        photoThumbUrl: upload?.thumbUrl ?? null,
+        photoUrl: upload?.url ?? null,
+        lat: verifiedPosition.lat,
+        lng: verifiedPosition.lng
+      });
       navigator.vibrate?.(35);
       // Spread the delta over the original full report so the UI keeps address,
       // photo_url, severity, etc. while reflecting the updated cleanup/status fields.
@@ -2345,7 +2511,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
   const validateStep = useCallback(
     (step: ReportFormStep) => {
       const nextFieldErrors: Partial<Record<ReportFieldKey, string>> = {};
-    if (step === 1 && !selectedWard) {
+      if (step === 1 && !selectedWard) {
         nextFieldErrors.ward = "Search for your area and tap a result to continue.";
       }
       if (step === 2) {
@@ -2492,7 +2658,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
     try {
       setSubmitStage("uploading");
       setUploadProgress(0);
-      const photoUrl = await backend.uploadReportPhoto(photo, { onProgress: setUploadProgress });
+      const upload = await backend.uploadReportPhoto(photo, { onProgress: setUploadProgress });
       const input: NewReportInput = {
         latitude: location?.lat ?? selectedWard.center_lat,
         longitude: location?.lng ?? selectedWard.center_lng,
@@ -2505,7 +2671,8 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
         address: address.trim(),
         severity,
         category,
-        photo_url: photoUrl
+        photo_thumb_url: upload.thumbUrl ?? null,
+        photo_url: upload.url
       };
       setSubmitStage("saving");
       const submitted = await backend.submitReport(input);
