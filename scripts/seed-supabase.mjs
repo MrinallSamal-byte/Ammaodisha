@@ -102,15 +102,17 @@ function normalizeReportsForSeed(sourceReports, sourceWards, sourceBoundaries) {
       location_source: shouldUseWardCenter ? "ward_center" : "gps",
       ward_number: Number(ward.ward_number),
       address: shouldUseWardCenter ? getBhubaneswarAddress(ward) : report.address,
-      severity: report.severity ?? "medium",
-      category: report.category ?? "mixed",
+      severity: normalizeSeverity(report.severity),
+      category: normalizeCategory(report.category),
       status: report.status ?? "unresolved",
       photo_url: report.photo_url ?? null,
+      photo_thumb_url: report.photo_thumb_url ?? report.photo_url ?? null,
       reporter_id: report.reporter_id ?? null,
       reporter_name: report.reporter_name ?? null,
       upvote_count: report.upvote_count ?? 1,
       resolved_at: report.resolved_at ?? null,
       resolved_photo_url: report.resolved_photo_url ?? null,
+      resolved_photo_thumb_url: report.resolved_photo_thumb_url ?? null,
       resolved_by_name: report.resolved_by_name ?? null,
       resolved_lat: report.resolved_lat ?? null,
       resolved_lng: report.resolved_lng ?? null,
@@ -123,6 +125,24 @@ function normalizeReportsForSeed(sourceReports, sourceWards, sourceBoundaries) {
       flag_count: report.flag_count ?? 0
     };
   });
+}
+
+function normalizeSeverity(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "low" || normalized === "minor" || normalized === "small") return "small";
+  if (normalized === "medium" || normalized === "moderate") return "medium";
+  if (normalized === "high" || normalized === "severe" || normalized === "large") return "large";
+  if (normalized === "critical" || normalized === "massive") return "massive";
+  return "medium";
+}
+
+function normalizeCategory(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "household" || normalized === "organic") return "household";
+  if (normalized === "construction") return "construction";
+  if (normalized === "e-waste" || normalized === "ewaste") return "e-waste";
+  if (normalized === "biomedical") return "biomedical";
+  return "mixed";
 }
 
 function getFallbackWard(sourceWardNumber, sortedWards, wardsByNumber) {

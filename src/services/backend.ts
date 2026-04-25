@@ -13,10 +13,12 @@ import type {
   NewReportInput,
   Representative,
   ResolveReportInput,
+  SeverityKey,
   UploadReportPhotoOptions,
   UploadReportPhotoResult,
   Ward,
-  WardFeatureCollection
+  WardFeatureCollection,
+  WasteCategory
 } from "../types/domain";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -123,12 +125,30 @@ function normalizeReport(report: GarbageReport): GarbageReport {
     gps_accuracy_meters: report.gps_accuracy_meters == null ? null : Number(report.gps_accuracy_meters),
     ward_number: Number(report.ward_number),
     upvote_count: report.upvote_count ?? 1,
-    severity: report.severity ?? "medium",
-    category: report.category ?? "mixed",
+    severity: normalizeSeverity(report.severity),
+    category: normalizeCategory(report.category),
     status: report.status ?? "unresolved",
     moderation_status: report.moderation_status ?? "approved",
     location_source: report.location_source ?? (report.gps_latitude != null && report.gps_longitude != null ? "gps" : "ward_center")
   };
+}
+
+function normalizeSeverity(value: unknown): SeverityKey {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "low" || normalized === "minor" || normalized === "small") return "small";
+  if (normalized === "medium" || normalized === "moderate") return "medium";
+  if (normalized === "high" || normalized === "severe" || normalized === "large") return "large";
+  if (normalized === "critical" || normalized === "massive") return "massive";
+  return "medium";
+}
+
+function normalizeCategory(value: unknown): WasteCategory {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "household" || normalized === "organic") return "household";
+  if (normalized === "construction") return "construction";
+  if (normalized === "e-waste" || normalized === "ewaste") return "e-waste";
+  if (normalized === "biomedical") return "biomedical";
+  return "mixed";
 }
 
 function getPartyCode(partyShort?: string | null, partyFull?: string | null) {
@@ -271,36 +291,21 @@ function hashString(input: string) {
 }
 
 const INDIA_GARBAGE_IMAGE_POOL: ReportImageReplacement[] = [
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Garbage%20on%20a%20roadside.JPG", title: "Garbage on a roadside, India", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 800, height: 600 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Litter%20in%20India.jpg", title: "Litter in India", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
   { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Garbage%20Burning%20-%20Kanpur%2020220509%20083327.jpg", title: "Garbage Burning, Kanpur 2022", source_page: null, license: "CC BY-SA 4.0", credit: "Wikimedia Commons", width: 1280, height: 720 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/City%20Garbage%20Dump%20-%20Dhapa%20-%20Kolkata%202010-08-06%207017.JPG", title: "City Garbage Dump, Dhapa, Kolkata", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/City%20Garbage%20Dump%20-%20Dhapa%20-%20Kolkata%202010-08-06%207017%20%28cropped%29.JPG", title: "City Garbage Dump, Dhapa, Kolkata (cropped)", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 900, height: 600 },
   { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Burning%20Garbage%20-%20East%20Kolkata%20Wetlands%20-%20Nalban%20-%20Kolkata%202017-06-09%202031.JPG", title: "Burning Garbage, East Kolkata Wetlands 2017", source_page: null, license: "CC BY-SA 4.0", credit: "Wikimedia Commons", width: 1280, height: 960 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Ducks%20in%20Litter%20at%20Lalbagh%20%2814954009291%29.jpg", title: "Litter at Lalbagh, Bengaluru", source_page: null, license: "CC BY 2.0", credit: "Wikimedia Commons", width: 1024, height: 683 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/GangaTheLife.jpg", title: "Garbage along the Ganga, Varanasi", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Litter%20on%20farmland.jpg", title: "Litter on farmland, India", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Jaipur%20trash%20recycling.JPG", title: "Trash and waste, Jaipur", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Beautiful%20Nature%20-%20Garbage%20Dump%20at%20Sonmarg%20Glacier%20-%20Jammu%20%26%20Kashmir%20-%20India%20%2826843490645%29.jpg", title: "Garbage dump, Sonmarg, Jammu & Kashmir", source_page: null, license: "CC BY 2.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Garbage%20Burning%20-%20Nicco%20Park%20-%20Jheel%20Meel%20-%20Salt%20Lake%20City%20-%20Kolkata%2020171110091127.jpg", title: "Garbage Burning, Salt Lake City, Kolkata 2017", source_page: null, license: "CC BY-SA 4.0", credit: "Wikimedia Commons", width: 1280, height: 960 },
+  { photo_url: "https://upload.wikimedia.org/wikipedia/commons/8/84/Garbage_heap_in_Batla_House%2C_New_Delhi%2C_18_June_2024.jpg", title: "Garbage heap, Batla House, New Delhi 2024", source_page: null, license: "CC BY-SA 4.0", credit: "Wikimedia Commons", width: 4000, height: 3000 },
   { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Cow%20in%20Delhi-1.jpg", title: "Street garbage with cow, Delhi", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
   { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Cow%20in%20Delhi-2.jpg", title: "Street waste with cattle, Delhi", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
   { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Cow%20in%20Delhi-3.jpg", title: "Roadside garbage, Delhi", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Biodiversity%20of%20River%20Hooghly.jpg", title: "Waste along River Hooghly, Kolkata", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Dog%20sleeping%20on%20newspaper%20waste.jpg", title: "Street waste with stray dog, India", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
   { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Clean%20your%20city-P1080552.jpg", title: "Garbage pile on street, Kolkata", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Cleaning%20time%20near%20Maniktala%20crossing-P1080538.jpg", title: "Waste heap, Maniktala crossing, Kolkata", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Dhapa%20Road%20-%20Eastern%20Metropolitan%20Bypass%20-%20Kolkata%202012-09-18%200910.JPG", title: "Garbage dump, Dhapa Road, Kolkata", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Entrance%20-%20Solid%20Waste%20Disposal%20Ground%20-%20Kolkata%202012-09-18%200910%20%28cropped%29.JPG", title: "Solid waste disposal site, Kolkata", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 900, height: 675 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/India-5237%20-%20Flickr%20-%20archer10%20%28Dennis%29.jpg", title: "Street garbage, India", source_page: null, license: "CC BY-SA 2.0", credit: "Wikimedia Commons", width: 1024, height: 683 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/India-6017%20-%20Flickr%20-%20archer10%20%28Dennis%29.jpg", title: "Street waste, India", source_page: null, license: "CC BY-SA 2.0", credit: "Wikimedia Commons", width: 1024, height: 683 },
   { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Dol%20Aftermath.jpg", title: "Post-festival waste on street, Kolkata", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/City%20kolkata%20Municipal%20Corporation.jpg", title: "Kolkata municipal garbage", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
   { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Close%20up%20image%20displaying%20trash%20scattered%20by%20the%20road%20side.jpg", title: "Roadside trash, India", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
   { photo_url: "https://upload.wikimedia.org/wikipedia/commons/b/b7/The_waste_dumped_in_drainage.jpg", title: "Waste dumped in drain, India", source_page: null, license: "CC BY-SA 4.0", credit: "Wikimedia Commons", width: 348, height: 260 },
-  { photo_url: "https://www.orissapost.com/wp-content/uploads/2025/09/Daringbadi.jpg", title: "Garbage dumps, Daringbadi, Odisha", source_page: null, license: null, credit: "OrissaPOST", width: 1280, height: 545 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Puri%2006a%20egret%20%2827585693220%29.jpg", title: "Waste near Puri beach, Odisha", source_page: null, license: "CC BY-SA 2.0", credit: "Wikimedia Commons", width: 500, height: 375 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Crossing%20the%20street%20in%20Mathura.jpg", title: "Street garbage, Mathura, Uttar Pradesh", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
-  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Litter%20in%20India.jpg", title: "Public place litter, India", source_page: null, license: "CC BY-SA 3.0", credit: "Wikimedia Commons", width: 1024, height: 768 }
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Garbej%20dump%20on%20the%20Delhi%20-%20Karnal%20Road%2004.jpg", title: "Garbage dump on Delhi-Karnal Road 2023", source_page: null, license: "CC BY-SA 4.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Garbej%20dump%20on%20the%20Delhi%20-%20Karnal%20Road%2003.jpg", title: "Garbage dump on Delhi-Karnal Road 2023", source_page: null, license: "CC BY-SA 4.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://commons.wikimedia.org/wiki/Special:Redirect/file/Garbage%20dumped%20in%20the%20Tulsian%20Bawri%2C%20Jhunjhunu.jpg", title: "Garbage dumped in Tulsian Bawri, Jhunjhunu 2022", source_page: null, license: "CC BY-SA 4.0", credit: "Wikimedia Commons", width: 1024, height: 768 },
+  { photo_url: "https://www.orissapost.com/wp-content/uploads/2025/09/Daringbadi.jpg", title: "Garbage dumps, Daringbadi, Odisha", source_page: null, license: null, credit: "OrissaPOST", width: 1280, height: 545 }
 ];
 
 let reportImageReplacementCache: Promise<ReportImageReplacement[]> | null = null;
@@ -940,14 +945,27 @@ class SupabaseBackend extends LocalBackend {
     if (!reports.length) return reports;
 
     const reportIds = reports.map((report) => report.id);
-    const { data: upvotes, error } = await this.client
-      .from("report_upvotes")
-      .select("report_id")
-      .in("report_id", reportIds);
-    if (error) throw error;
+    const chunkSize = 100;
+    const chunks: string[][] = [];
+    for (let index = 0; index < reportIds.length; index += chunkSize) {
+      chunks.push(reportIds.slice(index, index + chunkSize));
+    }
+    const upvoteResults = await Promise.all(
+      chunks.map((chunk) =>
+        this.client
+          .from("report_upvotes")
+          .select("report_id")
+          .in("report_id", chunk)
+      )
+    );
+    const upvoteRows: { report_id: string }[] = [];
+    for (const { data, error } of upvoteResults) {
+      if (error) throw error;
+      upvoteRows.push(...((data ?? []) as { report_id: string }[]));
+    }
 
     const voteRowsByReportId = new Map<string, number>();
-    (upvotes ?? []).forEach((vote) => {
+    upvoteRows.forEach((vote) => {
       const reportId = vote.report_id as string;
       voteRowsByReportId.set(reportId, (voteRowsByReportId.get(reportId) ?? 0) + 1);
     });
@@ -1008,59 +1026,67 @@ class SupabaseBackend extends LocalBackend {
       .select("*")
       .order("created_at", { ascending: false });
     if (!IS_STAGING) query = query.eq("is_test", false);
-    const { data, error } = await query;
-    if (error) {
-      if (isMissingPublicReportSurface(error)) return this.fallback.fetchReports();
-      throw error;
+    const [supabaseResult, localReports] = await Promise.all([
+      query,
+      fetchJson<GarbageReport[]>("/reports.json").catch(() => [] as GarbageReport[])
+    ]);
+    const supabaseReports = (supabaseResult.data ?? []) as GarbageReport[];
+    if (supabaseResult.error && !isMissingPublicReportSurface(supabaseResult.error)) {
+      console.warn("Supabase report fetch error, using local data:", supabaseResult.error);
     }
-    const withCounts = await this.mergeDerivedUpvoteCounts((data ?? []) as GarbageReport[]);
+
+    // Only merge upvote counts for Supabase reports (local seed data already has counts)
+    const withCounts = supabaseReports.length
+      ? await this.mergeDerivedUpvoteCounts(supabaseReports)
+      : supabaseReports;
+
+    // Merge: Supabase reports take priority (real user submissions)
+    const byId = new Map<string, GarbageReport>();
+    for (const report of localReports) byId.set(report.id, report);
+    for (const report of withCounts) byId.set(report.id, report); // overwrite locals
+    const merged = [...byId.values()]
+      .map(normalizeReport)
+      .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+
     const replacementImages = await fetchReportImageReplacements();
-    return applyReportImageReplacements(withCounts.map(normalizeReport), replacementImages);
+    return applyReportImageReplacements(merged, replacementImages);
   }
 
   override async fetchReportById(id: string) {
-    const { data, error } = await this.client.from(PUBLIC_REPORTS_VIEW).select("*").eq("id", id).single();
+    const { data, error } = await this.client.from(PUBLIC_REPORTS_VIEW).select("*").eq("id", id).maybeSingle();
     if (error) {
       if (isMissingPublicReportSurface(error)) return this.fallback.fetchReportById(id);
-      return null;
+      console.warn("Supabase report detail fetch error, using local data:", error);
+      return this.fallback.fetchReportById(id);
     }
-    const [reportWithCount] = await this.mergeDerivedUpvoteCounts([data as GarbageReport]);
-    const replacementImages = await fetchReportImageReplacements();
-    return applyReportImageReplacements([normalizeReport(reportWithCount)], replacementImages)[0] ?? null;
+    if (!data) {
+      return this.fallback.fetchReportById(id);
+    }
+    try {
+      const [reportWithCount] = await this.mergeDerivedUpvoteCounts([data as GarbageReport]);
+      const replacementImages = await fetchReportImageReplacements();
+      return applyReportImageReplacements([normalizeReport(reportWithCount)], replacementImages)[0] ?? null;
+    } catch (countError) {
+      console.warn("Supabase upvote count fetch error, using persisted report count:", countError);
+      const replacementImages = await fetchReportImageReplacements();
+      return applyReportImageReplacements([normalizeReport(data as GarbageReport)], replacementImages)[0] ?? null;
+    }
   }
 
   override async fetchReportsByWard(wardNumber: number) {
-    const { data, error } = await this.client
-      .from(PUBLIC_REPORTS_VIEW)
-      .select("*")
-      .eq("ward_number", wardNumber)
-      .order("created_at", { ascending: false });
-    if (error) {
-      if (isMissingPublicReportSurface(error)) return this.fallback.fetchReportsByWard(wardNumber);
-      throw error;
-    }
-    const withCounts = await this.mergeDerivedUpvoteCounts((data ?? []) as GarbageReport[]);
-    const replacementImages = await fetchReportImageReplacements();
-    return applyReportImageReplacements(withCounts.map(normalizeReport), replacementImages);
+    return (await this.fetchReports()).filter((report) => report.ward_number === wardNumber);
   }
 
   override async fetchReportsByConstituency(constituency: string, type: "mla" | "mp") {
     const column = type === "mla" ? "assembly_constituency" : "parliamentary_constituency";
     const { data: wards, error } = await this.client.from("wards").select("ward_number").eq(column, constituency);
-    if (error) throw error;
-    if (!wards?.length) return [];
-    const { data, error: reportError } = await this.client
-      .from(PUBLIC_REPORTS_VIEW)
-      .select("*")
-      .in("ward_number", wards.map((w) => w.ward_number))
-      .order("created_at", { ascending: false });
-    if (reportError) {
-      if (isMissingPublicReportSurface(reportError)) return this.fallback.fetchReportsByConstituency(constituency, type);
-      throw reportError;
+    if (error) {
+      console.warn("Supabase constituency ward fetch error, using local data:", error);
+      return this.fallback.fetchReportsByConstituency(constituency, type);
     }
-    const withCounts = await this.mergeDerivedUpvoteCounts((data ?? []) as GarbageReport[]);
-    const replacementImages = await fetchReportImageReplacements();
-    return applyReportImageReplacements(withCounts.map(normalizeReport), replacementImages);
+    if (!wards?.length) return [];
+    const wardNumbers = new Set(wards.map((ward) => Number(ward.ward_number)));
+    return (await this.fetchReports()).filter((report) => wardNumbers.has(report.ward_number));
   }
 
   override async submitReport(input: NewReportInput) {
