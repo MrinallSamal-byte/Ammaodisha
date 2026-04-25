@@ -395,24 +395,26 @@ function applyReportImageReplacements(reports: GarbageReport[], replacements: Re
 
   return reports.map((report, index) => {
     const currentPhotoUrl = report.photo_url ?? "";
-    const existingReplacement = report.photo_url ? replacementsByUrl.get(report.photo_url) : null;
-    if (existingReplacement && !usedPhotoUrls.has(existingReplacement.photo_url)) {
-      usedPhotoUrls.add(existingReplacement.photo_url);
-      return addReportImageAttribution(report, existingReplacement);
+
+    // If the report already has a photo URL
+    if (currentPhotoUrl) {
+      // Check if this exact URL was already used by a previous report
+      if (!usedPhotoUrls.has(currentPhotoUrl)) {
+        usedPhotoUrls.add(currentPhotoUrl);
+        const existingReplacement = replacementsByUrl.get(currentPhotoUrl);
+        if (existingReplacement) {
+          return addReportImageAttribution(report, existingReplacement);
+        }
+        // Not in replacement pool but has a URL — keep as-is (user-uploaded or external)
+        if (!isLegacyReportPhoto(report)) {
+          return report;
+        }
+      }
+      // URL is a duplicate — fall through to get a unique replacement
     }
 
-    if (!existingReplacement && currentPhotoUrl && !isLegacyReportPhoto(report) && !usedPhotoUrls.has(currentPhotoUrl)) {
-      usedPhotoUrls.add(currentPhotoUrl);
-      return report;
-    }
-
-    if (!currentPhotoUrl) {
-      const image = pickReportImage(uniqueReplacements, usedPhotoUrls, `${report.id}:${index}:missing`);
-      if (!image) return addReportImageAttribution(report, ODISHA_GARBAGE_FALLBACK_IMAGE);
-      return addReportImageAttribution(report, image);
-    }
-
-    const image = pickReportImage(uniqueReplacements, usedPhotoUrls, `${report.id}:${index}`);
+    // Assign a unique replacement image for reports with no photo, legacy photos, or duplicates
+    const image = pickReportImage(uniqueReplacements, usedPhotoUrls, `${report.id}:${index}:reassign`);
     if (!image) return addReportImageAttribution(report, ODISHA_GARBAGE_FALLBACK_IMAGE);
     return addReportImageAttribution(report, image);
   });
