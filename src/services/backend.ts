@@ -28,6 +28,8 @@ const supabaseAnonKey =
 const adminFunctionUrl = import.meta.env.VITE_ADMIN_FUNCTION_URL as string | undefined;
 const localAdminKey = import.meta.env.DEV ? (import.meta.env.VITE_LOCAL_ADMIN_KEY as string | undefined) || "" : "";
 const PUBLIC_REPORTS_VIEW = "public_garbage_reports";
+const PUBLIC_REPORT_EVENTS_TABLE = "public_report_change_events";
+const ADMIN_QUEUE_EVENTS_TABLE = "admin_queue_change_events";
 
 if (import.meta.env.DEV && !localAdminKey) {
   console.warn(
@@ -921,6 +923,11 @@ class LocalBackend implements Backend {
     return () => {};
   }
 
+  subscribeToAdminChanges(callback: () => void): () => void {
+    void callback;
+    return () => {};
+  }
+
   private assertAdmin(adminKey: string) {
     if (!adminKey || !localAdminKey || adminKey !== localAdminKey) throw new Error("Invalid admin key");
   }
@@ -1042,13 +1049,21 @@ class SupabaseBackend extends LocalBackend {
       ? await this.mergeDerivedUpvoteCounts(supabaseReports)
       : supabaseReports;
 
-    // Merge: Supabase reports take priority (real user submissions)
-    const byId = new Map<string, GarbageReport>();
-    for (const report of localReports) byId.set(report.id, report);
-    for (const report of withCounts) byId.set(report.id, report); // overwrite locals
-    const merged = [...byId.values()]
-      .map(normalizeReport)
-      .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+    // Use Supabase reports as source of truth if the query succeeded without error.
+    // Otherwise, fallback to merging local seed data.
+    let merged: GarbageReport[];
+    if (!supabaseResult.error) {
+      merged = withCounts
+        .map(normalizeReport)
+        .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+    } else {
+      const byId = new Map<string, GarbageReport>();
+      for (const report of localReports) byId.set(report.id, report);
+      for (const report of withCounts) byId.set(report.id, report); // overwrite locals
+      merged = [...byId.values()]
+        .map(normalizeReport)
+        .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+    }
 
     const replacementImages = await fetchReportImageReplacements();
     return applyReportImageReplacements(merged, replacementImages);
@@ -1062,7 +1077,7 @@ class SupabaseBackend extends LocalBackend {
       return this.fallback.fetchReportById(id);
     }
     if (!data) {
-      return this.fallback.fetchReportById(id);
+      return null;
     }
     try {
       const [reportWithCount] = await this.mergeDerivedUpvoteCounts([data as GarbageReport]);
@@ -1255,15 +1270,32 @@ class SupabaseBackend extends LocalBackend {
       .channel("garbage-report-changes")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "garbage_reports" },
+        { event: "INSERT", schema: "public", table: PUBLIC_REPORT_EVENTS_TABLE },
         () => void callback()
       )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn("Supabase realtime subscription failed:", status);
+        }
+      });
+    return () => {
+      void this.client.removeChannel(channel);
+    };
+  }
+
+  override subscribeToAdminChanges(callback: () => void): () => void {
+    const channel = this.client
+      .channel("admin-queue-changes")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "report_upvotes" },
+        { event: "INSERT", schema: "public", table: ADMIN_QUEUE_EVENTS_TABLE },
         () => void callback()
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn("Supabase admin realtime subscription failed:", status);
+        }
+      });
     return () => {
       void this.client.removeChannel(channel);
     };

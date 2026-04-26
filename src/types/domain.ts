@@ -180,4 +180,5 @@ export interface Backend {
   swapDuplicate(adminKey: string, reportId: string, existingId: string): Promise<void>;
   rejectBoth(adminKey: string, reportId: string, existingId: string): Promise<void>;
   subscribeToChanges(callback: () => void): () => void;
+  subscribeToAdminChanges(callback: () => void): () => void;
 }

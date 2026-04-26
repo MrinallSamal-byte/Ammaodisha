@@ -1,0 +1,252 @@
+create schema if not exists private;
+revoke all on schema private from public;
+grant usage on schema private to postgres, service_role;
+
+-- Keep the security-invoker public view while removing direct public access to
+-- raw GPS coordinates. The helper returns only the masked public coordinate.
+create or replace function private.public_report_coordinates(p_report_id uuid)
+returns table (
+  latitude numeric(10, 7),
+  longitude numeric(10, 7),
+  location_source text
+)
+language sql
+stable
+security definer
+set search_path = public, private, pg_temp
+as $$
+  select
+    case
+      when report.location_source = 'gps' then ward.center_lat
+      else report.latitude
+    end::numeric(10, 7) as latitude,
+    case
+      when report.location_source = 'gps' then ward.center_lng
+      else report.longitude
+    end::numeric(10, 7) as longitude,
+    'ward_center'::text as location_source
+  from public.garbage_reports report
+  join public.wards ward on ward.ward_number = report.ward_number
+  where report.id = p_report_id
+    and report.moderation_status = 'approved'
+    and report.status in ('unresolved', 'resolved')
+  limit 1;
+$$;
+
+revoke all on function private.public_report_coordinates(uuid) from public, anon, authenticated;
+grant execute on function private.public_report_coordinates(uuid) to anon, authenticated;
+
+drop view if exists public.public_garbage_reports;
+
+create view public.public_garbage_reports
+with (security_barrier = true, security_invoker = true)
+as
+select
+  report.id,
+  coords.latitude,
+  coords.longitude,
+  coords.location_source,
+  report.ward_number,
+  report.address,
+  report.severity,
+  report.category,
+  report.status,
+  report.photo_url,
+  report.photo_thumb_url,
+  report.upvote_count,
+  report.resolved_at,
+  report.resolved_photo_url,
+  report.resolved_photo_thumb_url,
+  null::numeric(10, 7) as resolved_lat,
+  null::numeric(10, 7) as resolved_lng,
+  report.created_at,
+  report.updated_at,
+  report.is_test,
+  report.moderation_status
+from public.garbage_reports report
+join lateral private.public_report_coordinates(report.id) coords on true
+where report.moderation_status = 'approved'
+  and report.status in ('unresolved', 'resolved');
+
+comment on view public.public_garbage_reports is
+  'Approved public report projection without raw GPS, reporter, note, or moderation metadata columns.';
+
+revoke all on public.public_garbage_reports from public, anon, authenticated;
+grant select on public.public_garbage_reports to anon, authenticated;
+
+-- Anonymous clients only need public read models plus inserts for reports and
+-- upvotes. RLS remains the primary row filter, but grants should also be least
+-- privilege.
+revoke all on public.wards from public, anon, authenticated;
+grant select on public.wards to anon, authenticated;
+
+revoke all on public.representatives from public, anon, authenticated;
+grant select on public.representatives to anon, authenticated;
+
+drop policy if exists "representatives are public" on public.representatives;
+create policy "representatives are public" on public.representatives
+for select to anon, authenticated
+using (active = true);
+
+revoke all on public.ward_escalations from public, anon, authenticated;
+grant select on public.ward_escalations to anon, authenticated;
+
+revoke all on public.garbage_reports from public, anon, authenticated;
+grant insert (
+  id,
+  latitude,
+  longitude,
+  gps_latitude,
+  gps_longitude,
+  gps_accuracy_meters,
+  gps_recorded_at,
+  location_source,
+  ward_number,
+  address,
+  severity,
+  category,
+  photo_url,
+  photo_thumb_url,
+  is_test
+) on public.garbage_reports to anon, authenticated;
+grant select (
+  id,
+  ward_number,
+  address,
+  severity,
+  category,
+  status,
+  photo_url,
+  photo_thumb_url,
+  upvote_count,
+  resolved_at,
+  resolved_photo_url,
+  resolved_photo_thumb_url,
+  created_at,
+  updated_at,
+  is_test,
+  moderation_status
+) on public.garbage_reports to anon, authenticated;
+
+revoke all on public.report_upvotes from public, anon, authenticated;
+grant insert (
+  report_id,
+  voter_fingerprint
+) on public.report_upvotes to anon, authenticated;
+grant select (
+  report_id
+) on public.report_upvotes to anon, authenticated;
+
+-- Drop the legacy cleanup-proof overload that predated thumbnails.
+drop function if exists public.submit_cleanup_proof(uuid, text, numeric, numeric);
+revoke all on function public.submit_cleanup_proof(uuid, text, text, numeric, numeric) from public;
+grant execute on function public.submit_cleanup_proof(uuid, text, text, numeric, numeric)
+  to anon, authenticated;
+
+-- Internal helpers are not public RPCs.
+revoke all on function public.set_updated_at() from public, anon, authenticated;
+revoke all on function public.ward_geom(jsonb) from public, anon, authenticated;
+
+-- Non-sensitive realtime signal table. The website only needs to know that
+-- public report data changed; it refreshes through public_garbage_reports.
+create table if not exists public.public_report_change_events (
+  id bigint generated by default as identity primary key,
+  report_id uuid,
+  event_type text not null check (event_type in ('insert', 'update', 'delete')),
+  changed_at timestamptz not null default now()
+);
+
+alter table public.public_report_change_events enable row level security;
+
+drop policy if exists "public report change events are readable" on public.public_report_change_events;
+create policy "public report change events are readable" on public.public_report_change_events
+for select to anon, authenticated
+using (true);
+
+revoke all on public.public_report_change_events from public, anon, authenticated;
+grant select on public.public_report_change_events to anon, authenticated;
+
+create or replace function private.enqueue_public_report_change_event()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, private, pg_temp
+as $$
+declare
+  affected_report_id uuid;
+  next_public boolean := false;
+  previous_public boolean := false;
+begin
+  if tg_op = 'DELETE' then
+    affected_report_id := old.id;
+    previous_public := old.moderation_status = 'approved'
+      and old.status in ('unresolved', 'resolved');
+  else
+    affected_report_id := new.id;
+    next_public := new.moderation_status = 'approved'
+      and new.status in ('unresolved', 'resolved');
+
+    if tg_op = 'UPDATE' then
+      previous_public := old.moderation_status = 'approved'
+        and old.status in ('unresolved', 'resolved');
+    end if;
+  end if;
+
+  if next_public or previous_public then
+    insert into public.public_report_change_events (report_id, event_type)
+    values (affected_report_id, lower(tg_op));
+
+    delete from public.public_report_change_events
+    where changed_at < now() - interval '7 days';
+  end if;
+
+  return coalesce(new, old);
+end;
+$$;
+
+revoke all on function private.enqueue_public_report_change_event() from public, anon, authenticated;
+
+drop trigger if exists garbage_reports_public_change_event on public.garbage_reports;
+create trigger garbage_reports_public_change_event
+after insert or update or delete on public.garbage_reports
+for each row execute function private.enqueue_public_report_change_event();
+
+-- Publish only the non-sensitive event table for browser realtime refreshes.
+do $$
+begin
+  if exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'garbage_reports'
+  ) then
+    alter publication supabase_realtime drop table public.garbage_reports;
+  end if;
+
+  if exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'report_upvotes'
+  ) then
+    alter publication supabase_realtime drop table public.report_upvotes;
+  end if;
+
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'public_report_change_events'
+  ) then
+    alter publication supabase_realtime add table public.public_report_change_events;
+  end if;
+end $$;
+
+update storage.buckets
+set
+  file_size_limit = 10 * 1024 * 1024,
+  allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']::text[]
+where id = 'garbage-photos';

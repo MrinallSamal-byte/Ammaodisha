@@ -13,7 +13,7 @@ import {
   ShieldAlert,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { backend } from "../services/backend";
 import { SEVERITY } from "../services/constants";
 import { LOCAL_REPORT_PHOTO_FALLBACK_URL, ODISHA_GARBAGE_FALLBACK_IMAGE } from "../services/report-images";
@@ -78,6 +78,29 @@ export function AdminPanel() {
   const listRef = useRef<HTMLDivElement | null>(null);
   const touchStartRef = useRef<number | null>(null);
 
+  const loadQueue = useCallback(
+    async (status: ModerationStatus, key = adminKey, options: { silent?: boolean } = {}) => {
+      if (!options.silent) {
+        setLoading(true);
+        setActionError("");
+      }
+      try {
+        const [nextQueue, nextStats] = await Promise.all([backend.adminQueue(key, status), backend.adminStats(key)]);
+        setQueues((current) => ({ ...current, [status]: nextQueue }));
+        setStats(nextStats);
+      } catch (caught) {
+        if (options.silent) {
+          console.warn("Admin queue refresh failed", caught);
+          return;
+        }
+        setActionError(caught instanceof Error ? caught.message : "Failed to load queue. Please refresh.");
+      } finally {
+        if (!options.silent) setLoading(false);
+      }
+    },
+    [adminKey]
+  );
+
   const login = async (key = adminKey) => {
     setLoading(true);
     setLoginError("");
@@ -114,20 +137,6 @@ export function AdminPanel() {
   // explicitly so there is no stale-closure risk here.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const loadQueue = async (status: ModerationStatus, key = adminKey) => {
-    setLoading(true);
-    setActionError("");
-    try {
-      const [nextQueue, nextStats] = await Promise.all([backend.adminQueue(key, status), backend.adminStats(key)]);
-      setQueues((current) => ({ ...current, [status]: nextQueue }));
-      setStats(nextStats);
-    } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "Failed to load queue. Please refresh.");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const action = async (reportId: string, decision: ModerationStatus) => {
     setActionError("");
@@ -167,8 +176,34 @@ export function AdminPanel() {
 
   useEffect(() => {
     if (isLoggedIn) void loadQueue(activeTab);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, isLoggedIn]);
+  }, [activeTab, isLoggedIn, loadQueue]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !adminKey) return;
+
+    let refreshTimer: number | undefined;
+    const refreshSoon = () => {
+      if (document.hidden) return;
+      if (refreshTimer != null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        void loadQueue(activeTab, adminKey, { silent: true });
+      }, 700);
+    };
+    const refreshWhenVisible = () => {
+      if (!document.hidden) refreshSoon();
+    };
+
+    const unsubscribe = backend.subscribeToAdminChanges(refreshSoon);
+    const pollTimer = window.setInterval(refreshWhenVisible, 60_000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      if (refreshTimer != null) window.clearTimeout(refreshTimer);
+      window.clearInterval(pollTimer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      unsubscribe();
+    };
+  }, [activeTab, adminKey, isLoggedIn, loadQueue]);
 
   if (!isLoggedIn) {
     return (

@@ -2424,6 +2424,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
     (report?: GarbageReport | null) => {
       const nextReport = report ?? submittedReport;
       if (!nextReport) return;
+      if ((nextReport.moderation_status ?? "flagged") !== "approved") return;
       onSubmit(nextReport);
     },
     [onSubmit, submittedReport]
@@ -2733,27 +2734,34 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
           <p>
             {submittedReviewStatus === "approved"
               ? "Your report is live on the map now."
-              : "We review every photo before it appears publicly - usually within a few minutes."}
+              : "Thank you for your submission. We review every photo before it appears publicly. Misleading photos or information will be rejected by the admin."}
           </p>
-          <button
-            className="primary-cta submit-open-button"
-            type="button"
-            onClick={() => openSubmittedReport()}
-          >
-            <ArrowUpRight size={14} />
-            View my report
-          </button>
-          {submittedReviewStatus !== null && (
-            <button
-              className="secondary-cta submit-share-button"
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                void shareSubmittedReport();
-              }}
-            >
-              <Share2 size={15} />
-              Share your report
+          {submittedReviewStatus === "approved" ? (
+            <>
+              <button
+                className="primary-cta submit-open-button"
+                type="button"
+                onClick={() => openSubmittedReport()}
+              >
+                <ArrowUpRight size={14} />
+                View my report
+              </button>
+              <button
+                className="secondary-cta submit-share-button"
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void shareSubmittedReport();
+                }}
+              >
+                <Share2 size={15} />
+                Share your report
+              </button>
+            </>
+          ) : (
+            <button className="primary-cta submit-open-button" type="button" onClick={onClose}>
+              <CheckCircle2 size={14} />
+              Back to map
             </button>
           )}
         </div>
