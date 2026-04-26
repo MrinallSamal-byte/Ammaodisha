@@ -63,6 +63,9 @@ const reasonLabels: Record<string, string> = {
   pending_review: "pending review"
 };
 
+const MIN_TAB_SWIPE_PX = 72;
+const HORIZONTAL_SWIPE_RATIO = 1.5;
+
 export function AdminPanel() {
   const [adminKey, setAdminKey] = useState(() => readSessionValue(SESSION_KEY));
   const [showAdminKey, setShowAdminKey] = useState(false);
@@ -76,7 +79,7 @@ export function AdminPanel() {
   const [photo, setPhoto] = useState<string | null>(null);
   const [showTop, setShowTop] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
-  const touchStartRef = useRef<number | null>(null);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const loadQueue = useCallback(
     async (status: ModerationStatus, key = adminKey, options: { silent?: boolean } = {}) => {
@@ -165,13 +168,16 @@ export function AdminPanel() {
   const queue = queues[activeTab];
   const tabCounts = useMemo(() => tabs.map((tab) => ({ ...tab, count: stats?.[tab.key] ?? 0 })), [stats]);
 
-  const onTouchEnd = (clientX: number) => {
+  const onTouchEnd = (clientX: number, clientY: number) => {
     if (touchStartRef.current === null) return;
-    const diff = touchStartRef.current - clientX;
+    const diff = touchStartRef.current.x - clientX;
+    const verticalDiff = Math.abs(touchStartRef.current.y - clientY);
+    const horizontalDiff = Math.abs(diff);
     const index = tabs.findIndex((tab) => tab.key === activeTab);
-    if (diff > 60 && index < tabs.length - 1) setActiveTab(tabs[index + 1].key);
-    if (diff < -60 && index > 0) setActiveTab(tabs[index - 1].key);
     touchStartRef.current = null;
+    if (horizontalDiff < MIN_TAB_SWIPE_PX || horizontalDiff < verticalDiff * HORIZONTAL_SWIPE_RATIO) return;
+    if (diff > 0 && index < tabs.length - 1) setActiveTab(tabs[index + 1].key);
+    if (diff < 0 && index > 0) setActiveTab(tabs[index - 1].key);
   };
 
   useEffect(() => {
@@ -268,9 +274,13 @@ export function AdminPanel() {
         ref={listRef}
         onScroll={() => setShowTop((listRef.current?.scrollTop ?? 0) > 400)}
         onTouchStart={(event) => {
-          touchStartRef.current = event.touches[0].clientX;
+          if (event.touches.length !== 1) return;
+          touchStartRef.current = { x: event.touches[0].clientX, y: event.touches[0].clientY };
         }}
-        onTouchEnd={(event) => onTouchEnd(event.changedTouches[0].clientX)}
+        onTouchEnd={(event) => onTouchEnd(event.changedTouches[0].clientX, event.changedTouches[0].clientY)}
+        onTouchCancel={() => {
+          touchStartRef.current = null;
+        }}
       >
         {stats && (
           <section className="admin-stats">
