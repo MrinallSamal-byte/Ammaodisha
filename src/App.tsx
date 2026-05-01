@@ -1,4 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { PublicApp } from "./components/PublicApp";
 import { backend } from "./services/backend";
 import type { CivicData } from "./types/domain";
 
@@ -8,7 +9,6 @@ interface RouteHistoryState {
 }
 
 const AdminPanel = lazy(async () => ({ default: (await import("./components/AdminPanel")).AdminPanel }));
-const PublicApp = lazy(async () => ({ default: (await import("./components/PublicApp")).PublicApp }));
 
 function safeDecode(value: string) {
   try {
@@ -125,22 +125,13 @@ export default function App() {
   }
 
   return (
-    <Suspense
-      fallback={
-          <main className="loading-state">
-            <img src="/logo.png" alt="Amma Odisha" />
-            <p>Loading map experience…</p>
-          </main>
-        }
-    >
-      <PublicApp
-        autoOpenReport={autoOpenReport}
-        data={data}
-        routeSelection={routeSelection}
-        routeState={routeState}
-        onDataChange={setData}
-        navigate={navigate}
-      />
-    </Suspense>
+    <PublicApp
+      autoOpenReport={autoOpenReport}
+      data={data}
+      routeSelection={routeSelection}
+      routeState={routeState}
+      onDataChange={setData}
+      navigate={navigate}
+    />
   );
 }
