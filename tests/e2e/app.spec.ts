@@ -69,6 +69,7 @@ test("resolved-only map results guide users to list view", async ({ page }) => {
   await expect(page.getByText(/Only cleaned reports match/i)).toBeVisible();
   await page.getByRole("button", { name: /Open list/i }).click();
   await expect(page.locator(".report-item").first()).toBeVisible();
+  await expect(page.locator(".report-item").first().locator(".status-chip")).toContainText("Resolved");
 });
 
 test("insights priority queue opens urgent reports", async ({ page }) => {

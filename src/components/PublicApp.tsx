@@ -1538,7 +1538,7 @@ function ReportListItem({
           <SeverityMark severityKey={report.severity} />
           {severity.label}
         </em>
-        {mla ? <small className="mla-label">{mla.name}</small> : <span className={clsx("status-chip", report.status === "resolved" ? "is-resolved" : "is-open")}>{STATUS_LABELS[report.status]}</span>}
+        <span className={clsx("status-chip", report.status === "resolved" ? "is-resolved" : "is-open")}>{STATUS_LABELS[report.status]}</span>
       </span>
       <ChevronDown size={14} className="sideways" aria-hidden="true" />
     </button>
