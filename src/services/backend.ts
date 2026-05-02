@@ -135,6 +135,10 @@ function normalizeReport(report: GarbageReport): GarbageReport {
   };
 }
 
+export function isPublicReport(report: Pick<GarbageReport, "moderation_status">) {
+  return (report.moderation_status ?? "approved") === "approved";
+}
+
 function normalizeSeverity(value: unknown): SeverityKey {
   const normalized = String(value ?? "").trim().toLowerCase();
   if (normalized === "low" || normalized === "minor" || normalized === "small") return "small";
@@ -726,7 +730,7 @@ function uploadStorageObjectWithProgress({
 class LocalBackend implements Backend {
   private data?: CivicData;
 
-  async fetchCivicData() {
+  private async loadCivicData() {
     if (!this.data) {
       const [wardSeed, wardBoundaries, cityBoundary, representativeSeed, reports, politicalMapping, replacementImages] = await Promise.all([
         fetchJson<Ward[]>("/wards.json"),
@@ -755,12 +759,20 @@ class LocalBackend implements Backend {
     return this.data;
   }
 
+  async fetchCivicData() {
+    const data = await this.loadCivicData();
+    return {
+      ...data,
+      reports: data.reports.filter(isPublicReport)
+    };
+  }
+
   async fetchReports() {
-    const data = await this.fetchCivicData();
+    const data = await this.loadCivicData();
     // Re-merge from localStorage so in-session submissions are always reflected.
     const replacementImages = await fetchReportImageReplacements();
     const reports = normalizeReportsForBhubaneswar(mergeLocalReports(data.reports), data.wards, data.wardBoundaries, data.cityBoundary);
-    return applyReportImageReplacements(reports, replacementImages).filter((report) => report.moderation_status !== "rejected");
+    return applyReportImageReplacements(reports, replacementImages).filter(isPublicReport);
   }
 
   async fetchReportById(id: string) {
@@ -858,7 +870,7 @@ class LocalBackend implements Backend {
 
   async adminStats(adminKey: string) {
     this.assertAdmin(adminKey);
-    const reports = (await this.fetchCivicData()).reports;
+    const reports = (await this.loadCivicData()).reports;
     return {
       total: reports.length,
       flagged: reports.filter((r) => r.moderation_status === "flagged").length,
@@ -869,12 +881,12 @@ class LocalBackend implements Backend {
 
   async adminQueue(adminKey: string, status: ModerationStatus) {
     this.assertAdmin(adminKey);
-    return (await this.fetchCivicData()).reports.filter((r) => r.moderation_status === status);
+    return (await this.loadCivicData()).reports.filter((r) => r.moderation_status === status);
   }
 
   async moderateReport(adminKey: string, reportId: string, decision: ModerationStatus) {
     this.assertAdmin(adminKey);
-    const report = (await this.fetchCivicData()).reports.find((item) => item.id === reportId);
+    const report = (await this.loadCivicData()).reports.find((item) => item.id === reportId);
     if (!report) throw new Error("Report not found");
     upsertLocalReports([
       {
@@ -890,7 +902,7 @@ class LocalBackend implements Backend {
     // Single read-modify-write pass for efficiency.
     this.assertAdmin(adminKey);
     const idSet = new Set(reportIds);
-    const reports = (await this.fetchCivicData()).reports;
+    const reports = (await this.loadCivicData()).reports;
     const now = new Date().toISOString();
     const updated = reports
       .filter((r) => idSet.has(r.id))
@@ -903,7 +915,7 @@ class LocalBackend implements Backend {
     // Approve incoming, reject original — single pass.
     this.assertAdmin(adminKey);
     const decisions = new Map<string, ModerationStatus>([[reportId, "approved"], [existingId, "rejected"]]);
-    const reports = (await this.fetchCivicData()).reports;
+    const reports = (await this.loadCivicData()).reports;
     const now = new Date().toISOString();
     const updated = reports.flatMap((r) => {
       const decision = decisions.get(r.id);
@@ -1035,10 +1047,7 @@ class SupabaseBackend extends LocalBackend {
       .select("*")
       .order("created_at", { ascending: false });
     if (!IS_STAGING) query = query.eq("is_test", false);
-    const [supabaseResult, localReports] = await Promise.all([
-      query,
-      fetchJson<GarbageReport[]>("/reports.json").catch(() => [] as GarbageReport[])
-    ]);
+    const supabaseResult = await query;
     const supabaseReports = (supabaseResult.data ?? []) as GarbageReport[];
     if (supabaseResult.error && !isMissingPublicReportSurface(supabaseResult.error)) {
       console.warn("Supabase report fetch error, using local data:", supabaseResult.error);
@@ -1057,6 +1066,7 @@ class SupabaseBackend extends LocalBackend {
         .map(normalizeReport)
         .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
     } else {
+      const localReports = await fetchJson<GarbageReport[]>("/reports.json").catch(() => [] as GarbageReport[]);
       const byId = new Map<string, GarbageReport>();
       for (const report of localReports) byId.set(report.id, report);
       for (const report of withCounts) byId.set(report.id, report); // overwrite locals
@@ -1066,7 +1076,7 @@ class SupabaseBackend extends LocalBackend {
     }
 
     const replacementImages = await fetchReportImageReplacements();
-    return applyReportImageReplacements(merged, replacementImages);
+    return applyReportImageReplacements(merged, replacementImages).filter(isPublicReport);
   }
 
   override async fetchReportById(id: string) {
