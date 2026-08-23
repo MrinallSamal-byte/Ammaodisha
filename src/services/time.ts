@@ -47,3 +47,15 @@ export function shortDate(createdAt: string): string {
     year: sameYear ? undefined : "numeric"
   });
 }
+
+export function shortDateI18n(
+  value: string | number | Date,
+  t: (key: string, vars?: Record<string, string | number>) => string
+): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const monthAbbr = date.toLocaleDateString("en-IN", { month: "short" }).toLowerCase();
+  const month = t(`months.${monthAbbr}`);
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return sameYear ? `${month} ${date.getDate()}` : `${month} ${date.getDate()}, ${date.getFullYear()}`;
+}

@@ -1,6 +1,7 @@
 import type { GeoJSONSource, Map as MapLibreMap } from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CITY_CENTER, CITY_MAX_BOUNDS, CITY_MIN_ZOOM, CITY_ZOOM, MAP_STYLE, SEVERITY } from "../services/constants";
+import { t, useLang } from "../services/i18n";
 import { createMarkerPlacements } from "../services/map-markers";
 import { createCoverageData, getBounds, type BoundsTuple, type LngLatTuple } from "../services/map-coverage";
 import type { FeatureCollection, MultiPolygon, Point, Polygon } from "geojson";
@@ -201,6 +202,7 @@ export function MapView({
   const [showClusterHint, setShowClusterHint] = useState(shouldShowClusterHint);
   const [hoverWard, setHoverWard] = useState<HoverWard | null>(null);
   const [tapWardChip, setTapWardChip] = useState<TapWardChip | null>(null);
+  useLang();
   const tapWardChipTimerRef = useRef<number | null>(null);
   const tapWardNavigateTimerRef = useRef<number | null>(null);
   const reportPointData = useMemo(() => createReportPointData(reports, wardBoundaries), [reports, wardBoundaries]);
@@ -604,33 +606,33 @@ export function MapView({
   }
 
   return (
-    <div className="map-shell" aria-label="Amma Odisha Bhubaneswar garbage map">
+    <div className="map-shell" aria-label={t("aria.mapRegion")}>
       <div className="map-canvas" ref={containerRef} />
       {mapLoadError && (
         <div className="map-shell map-loading-shell" role="alert">
           <div className="map-loading-pill">
-            Map failed to load.
-            <button type="button" onClick={handleMapRetry}>Retry</button>
+            {t("map.loadFailed")}
+            <button type="button" onClick={handleMapRetry}>{t("action.retry")}</button>
           </div>
         </div>
       )}
-      <div className="map-stats-pill" aria-label="Visible map report statistics">
+      <div className="map-stats-pill" aria-label={t("aria.mapStats")}>
         <span>
           <strong>{activeReportCount}</strong>
-          Active
+          {t("stats.active")}
         </span>
         <i aria-hidden="true" />
         <span>
           <strong>{visibleReportCount}</strong>
-          Reports
+          {t("stats.reportsLabel")}
         </span>
       </div>
-      <div className="map-legend" aria-label="Map severity legend">
-        <span>Severity</span>
+      <div className="map-legend" aria-label={t("aria.mapLegend")}>
+        <span>{t("filters.severity")}</span>
         {MAP_LEGEND_SEVERITIES.map((severityKey) => (
           <em key={severityKey}>
             <i style={{ background: SEVERITY[severityKey].color }} aria-hidden="true" />
-            {SEVERITY[severityKey].label}
+            {t(`severity.${severityKey}`)}
           </em>
         ))}
       </div>
@@ -638,27 +640,31 @@ export function MapView({
         <div className="map-ward-tooltip" aria-hidden="true">
           <strong>{hoverWard.wardName}</strong>
           <span>
-            Ward {hoverWard.wardNumber}
+            {t("ward.label", { ward: hoverWard.wardNumber })}
             {hoverWard.zone ? ` · ${hoverWard.zone}` : ""}
           </span>
           {hoverWard.assemblyConstituency && (
             <small>{hoverWard.assemblyConstituency}</small>
           )}
-          <em>{hoverWard.reportCount} reports</em>
+          <em>{t("map.reportsCount", { count: hoverWard.reportCount })}</em>
         </div>
       )}
       <span className="sr-only" aria-live="polite">
-        {hoverWard ? `${hoverWard.wardName}, Ward ${hoverWard.wardNumber}` : ""}
+        {hoverWard ? `${hoverWard.wardName}, ${t("ward.label", { ward: hoverWard.wardNumber })}` : ""}
       </span>
       {tapWardChip && (
         <div className="map-ward-tap-chip" aria-live="polite" aria-atomic="true">
-          <strong>{tapWardChip.wardName || `Ward ${tapWardChip.wardNumber}`}</strong>
-          <em>{tapWardChip.activeReportCount} active {tapWardChip.activeReportCount === 1 ? "report" : "reports"}</em>
+          <strong>{tapWardChip.wardName || t("ward.label", { ward: tapWardChip.wardNumber })}</strong>
+          <em>
+            {tapWardChip.activeReportCount === 1
+              ? t("map.oneActiveReport", { count: tapWardChip.activeReportCount })
+              : t("map.manyActiveReports", { count: tapWardChip.activeReportCount })}
+          </em>
         </div>
       )}
       {showClusterHint && (
-        <div className="map-cluster-hint" aria-label="Map cluster guidance">
-          Grouped reports. Zoom in to see exact spots.
+        <div className="map-cluster-hint" aria-label={t("aria.clusterHint")}>
+          {t("map.clusterHint")}
         </div>
       )}
     </div>

@@ -5,3 +5,9 @@ export async function pinEnglish(page: Page): Promise<void> {
     window.localStorage.setItem("ao_lang", "en");
   });
 }
+
+export async function pinOdia(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("ao_lang", "or");
+  });
+}

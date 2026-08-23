@@ -40,7 +40,7 @@ import { canSubmitReport, hasUpvoted } from "../services/limits";
 import { getMyReports, trackMyReport } from "../services/my-reports";
 import { LOCAL_REPORT_PHOTO_FALLBACK_URL, ODISHA_GARBAGE_FALLBACK_IMAGE } from "../services/report-images";
 import { generateBMCComplaint, getReportShareText, getWhatsAppUrl, shareOrCopy, shareReportViaWhatsApp } from "../services/share";
-import { daysActive, shortDate, timeAgoI18n } from "../services/time";
+import { daysActive, shortDateI18n, timeAgoI18n } from "../services/time";
 import type {
   CivicData,
   GarbageReport,
@@ -112,15 +112,12 @@ type ProfileSelection = Extract<Exclude<RouteSelection, null>, { type: "ward" | 
 
 type ExternalPreviewAction =
   | { kind: "maps"; value: string }
-  | { kind: "tel"; value: string }
+  | { kind: "tel"; value: string; label: string }
   | { kind: "whatsapp"; value: string };
 
 interface ExternalPreviewConfig {
   action: ExternalPreviewAction;
-  confirmLabel: string;
   details: string;
-  helper: string;
-  title: string;
 }
 
 interface PublicAppProps {
@@ -142,11 +139,11 @@ function getRouteSelectionPath(selection: Exclude<RouteSelection, null>) {
   return `/${selection.type}/${encodeURIComponent(selection.id)}`;
 }
 
-function getRouteSelectionLabel(selection: Exclude<RouteSelection, null>) {
-  if (selection.type === "ward") return `Ward ${selection.id}`;
-  if (selection.type === "mla") return "MLA profile";
-  if (selection.type === "mp") return "MP profile";
-  return "Report";
+function getRouteTargetLabel(selection: Exclude<RouteSelection, null>, data: Pick<CivicData, "representatives">) {
+  if (selection.type === "ward") return t("route.targetWard", { ward: selection.id });
+  const rep = data.representatives.find((item) => item.role === selection.type && item.constituency === selection.id);
+  const name = rep?.name ?? selection.id;
+  return t(selection.type === "mla" ? "route.targetMla" : "route.targetMp", { name });
 }
 
 function getStoredReturnProfile(value?: { id: string; type: string } | null): ProfileSelection | null {
@@ -177,7 +174,7 @@ function getDistinctWardName(ward?: Pick<Ward, "ward_number" | "ward_name"> | nu
 
 function getWardSelectLabel(ward: Ward) {
   const distinctName = getDistinctWardName(ward);
-  return distinctName ? `Ward ${ward.ward_number} - ${distinctName}` : `Ward ${ward.ward_number}`;
+  return distinctName ? `${t("ward.label", { ward: ward.ward_number })} - ${distinctName}` : t("ward.label", { ward: ward.ward_number });
 }
 
 function severityLabel(severity: SeverityKey) {
@@ -608,7 +605,7 @@ export function PublicApp({ autoOpenReport = false, connectionStatus, data, last
       onSuccessfulRefresh?.();
     } catch (err) {
       console.error("Refresh failed", err);
-      setRefreshError("Could not refresh reports. Check your connection and try again.");
+      setRefreshError(t("error.refreshBody"));
       // Data remains unchanged; we do not wipe existing reports on fetch failure.
     } finally {
       setRefreshing(false);
@@ -696,10 +693,13 @@ export function PublicApp({ autoOpenReport = false, connectionStatus, data, last
   const activeFilterSummary = useMemo(() => {
     const labels: string[] = [];
     const query = searchQuery.trim();
-    if (query) labels.push(`Search: ${query}`);
-    if (severityFilter !== "all") labels.push(`Severity: ${SEVERITY[severityFilter].label}`);
-    if (statusFilter !== "all") labels.push(`Status: ${statusFilter === "resolved" ? "Cleaned" : "Unresolved"}`);
-    if (wardFilterNumber != null) labels.push(`Ward ${wardFilterNumber}`);
+    if (query) labels.push(t("filter.summarySearch", { query }));
+    if (severityFilter !== "all") labels.push(t("filter.summarySeverity", { label: severityLabel(severityFilter) }));
+    if (statusFilter !== "all")
+      labels.push(
+        t("filter.summaryStatus", { label: statusFilter === "resolved" ? t("status.cleaned") : t("status.unresolved") })
+      );
+    if (wardFilterNumber != null) labels.push(t("ward.label", { ward: wardFilterNumber }));
     return labels;
   }, [searchQuery, severityFilter, statusFilter, wardFilterNumber]);
   const activeFilterCount = activeFilterSummary.length;
@@ -736,15 +736,15 @@ export function PublicApp({ autoOpenReport = false, connectionStatus, data, last
   const showMapEmptyState = viewMode === "map" && mapReports.length === 0;
   const mapEmptyHasListResults = visibleReports.length > 0;
   const mapEmptyTitle = mapEmptyHasListResults
-    ? "Only cleaned reports match"
+    ? t("map.onlyCleaned")
     : hasActiveFilters
-      ? "No reports match your filters"
-      : "No active reports visible yet";
+      ? t("map.noFilterMatches")
+      : t("map.noneYet");
   const mapEmptyDescription = mapEmptyHasListResults
-    ? "Resolved reports stay in the issue feed so the map stays focused on active garbage spots."
+    ? t("map.cleanedInList")
     : hasActiveFilters
-      ? "Clear filters to bring active map markers back."
-      : "New approved reports will appear here as active map markers.";
+      ? t("map.clearForMarkers")
+      : t("map.appearSoon");
 
   const connectionBadge =
     connectionStatus === "live" ? (
@@ -785,7 +785,7 @@ export function PublicApp({ autoOpenReport = false, connectionStatus, data, last
 
       <header className="topbar safe-top">
         <div className="brand-chip">
-          <button className="brand-home" onClick={() => navigate("/")} aria-label="Go to Amma Odisha map">
+          <button className="brand-home" onClick={() => navigate("/")} aria-label={t("aria.goHome")}>
             <span className="brand-wordmark">
               <strong>
                 Amma <b>Odisha</b>
@@ -819,16 +819,16 @@ export function PublicApp({ autoOpenReport = false, connectionStatus, data, last
           <button
             className="icon-button"
             onClick={() => setShowAbout(true)}
-            aria-label="About Amma Odisha"
-            title="About"
+            aria-label={t("about.title")}
+            title={t("nav.about")}
           >
             <Info size={17} />
           </button>
         </div>
       </header>
 
-      <section className="control-dock" aria-label="Map and report controls">
-        <div className="quick-filter-group" aria-label="Quick filters">
+      <section className="control-dock" aria-label={t("aria.dockControls")}>
+        <div className="quick-filter-group" aria-label={t("aria.quickFilters")}>
           <label className="quick-select">
             <span className="sr-only">{t("filters.severity")}</span>
             <select
@@ -907,13 +907,13 @@ export function PublicApp({ autoOpenReport = false, connectionStatus, data, last
       </section>
 
       {(isOffline || wardFilterState === "error" || refreshError) && (
-        <div className="control-alert-stack" aria-label="Map alerts">
+        <div className="control-alert-stack" aria-label={t("aria.mapAlerts")}>
           {isOffline && (
             <div className="notice amber offline-status" role="status">
               <CircleAlert size={16} />
               <span>
                 <strong>{t("offline.notice")}</strong>
-                Cached reports are still available, but submitting may fail.
+                {t("offline.cacheNote")}
               </span>
             </div>
           )}
@@ -922,7 +922,7 @@ export function PublicApp({ autoOpenReport = false, connectionStatus, data, last
               <CircleAlert size={16} />
               <span>
                 <strong>{t("error.locationNotFound")}</strong>
-                Choose filters manually or try again when GPS is available.
+                {t("error.gpsAdvice")}
               </span>
             </div>
           )}
@@ -975,16 +975,16 @@ export function PublicApp({ autoOpenReport = false, connectionStatus, data, last
           <div className="map-empty-actions">
             {mapEmptyHasListResults ? (
               <button type="button" onClick={() => setViewMode("list")}>
-                Open list
+                {t("action.openList")}
               </button>
             ) : (
               <button type="button" onClick={hasActiveFilters ? clearFilters : () => setShowReportForm(true)}>
-                {hasActiveFilters ? "Clear filters" : "Report garbage"}
+                {hasActiveFilters ? t("action.clearFilters") : t("action.reportGarbage")}
               </button>
             )}
             {mapEmptyHasListResults && (
               <button className="secondary-map-action" type="button" onClick={clearFilters}>
-                Clear filters
+                {t("action.clearFilters")}
               </button>
             )}
           </div>
@@ -993,7 +993,7 @@ export function PublicApp({ autoOpenReport = false, connectionStatus, data, last
 
       {viewMode === "list" && (
         <div className="list-overlay">
-          <div className="list-tools" aria-label="Search and sort list reports">
+          <div className="list-tools" aria-label={t("aria.listTools")}>
             <label>
               <Search size={14} />
               <input
@@ -1012,7 +1012,7 @@ export function PublicApp({ autoOpenReport = false, connectionStatus, data, last
               <option value="upvotes">{t("list.sortUpvoted")}</option>
               <option value="oldest">{t("list.sortOldest")}</option>
             </select>
-            <div className="list-stats-row" aria-label="Report statistics">
+            <div className="list-stats-row" aria-label={t("aria.listStats")}>
               <span className="list-stat list-stat-red">
                 <strong>{unresolved.length}</strong> {t("stats.active").toLowerCase()}
               </span>
@@ -1037,7 +1037,7 @@ export function PublicApp({ autoOpenReport = false, connectionStatus, data, last
       )}
 
       {viewMode === "list" && (
-        <section className="stats-strip" aria-label="Amma Odisha report statistics">
+        <section className="stats-strip" aria-label={t("aria.appStats")}>
           <Stat label={t("stats.active")} value={unresolved.length} tone="red" />
           <Stat label={t("stats.cleaned")} value={resolved.length} tone="green" />
           <Stat label={t("stats.total")} value={reports.length} tone="gray" />
@@ -1063,7 +1063,7 @@ export function PublicApp({ autoOpenReport = false, connectionStatus, data, last
           <Smartphone size={17} />
           {t("aria.scanQr")}
         </button>
-        <button className="insights-button" type="button" onClick={() => setShowInsights(true)} aria-label="Open Amma Odisha insights">
+        <button className="insights-button" type="button" onClick={() => setShowInsights(true)} aria-label={t("aria.openInsights")}>
           <BarChart3 size={18} />
           <span>
             <strong>{visibleReports.length}</strong>
@@ -1074,9 +1074,9 @@ export function PublicApp({ autoOpenReport = false, connectionStatus, data, last
 
       {showReportCoach && !showIntro && mapLoaded && !showReportForm && !selectedReport && !selectedProfile && !showInsights && !showMobileQR && (
         <div className="report-coach-mark" role="status">
-          <span>Ready to report?</span>
-          <strong>Use the bottom button to add a garbage spot with photo proof.</strong>
-          <button type="button" onClick={dismissReportCoach} aria-label="Dismiss report tip">
+          <span>{t("coach.ready")}</span>
+          <strong>{t("coach.body")}</strong>
+          <button type="button" onClick={dismissReportCoach} aria-label={t("aria.dismissCoach")}>
             <X size={12} />
           </button>
         </div>
@@ -1151,7 +1151,11 @@ export function PublicApp({ autoOpenReport = false, connectionStatus, data, last
         <ReportDetail
           report={selectedReport}
           data={data}
-          backLabel={returnProfile ? `Back to ${getRouteSelectionLabel(returnProfile)}` : "Back to map"}
+          backLabel={
+            returnProfile
+              ? t("route.backTo", { target: getRouteTargetLabel(returnProfile, data) })
+              : t("action.back")
+          }
           onBack={
             returnProfile
               ? () => {
@@ -1181,23 +1185,23 @@ export function PublicApp({ autoOpenReport = false, connectionStatus, data, last
         />
       ) : routeSelection?.type === "report" ? (
         routeReportLoading ? (
-          <DialogSurface ariaLabel="Loading report" className="mini-card" onClose={() => navigate("/")}>
-            <button className="close-button" onClick={() => navigate("/")} aria-label="Close report detail">
+          <DialogSurface ariaLabel={t("route.loading")} className="mini-card" onClose={() => navigate("/")}>
+            <button className="close-button" onClick={() => navigate("/")} aria-label={t("aria.closeReportDetail")}>
               <X size={18} />
             </button>
-            <h2>Loading report…</h2>
+            <h2>{t("route.loading")}</h2>
             <div className="loading-progress" aria-hidden="true" />
           </DialogSurface>
         ) : (
-          <DialogSurface ariaLabel="Report unavailable" className="mini-card" onClose={() => navigate("/")}>
-            <button className="close-button" onClick={() => navigate("/")} aria-label="Close report detail">
+          <DialogSurface ariaLabel={t("report.missingTitle")} className="mini-card" onClose={() => navigate("/")}>
+            <button className="close-button" onClick={() => navigate("/")} aria-label={t("aria.closeReportDetail")}>
               <X size={18} />
             </button>
-            <h2>Report unavailable</h2>
-            <p>This report may have been removed or the link may be outdated.</p>
+            <h2>{t("report.missingTitle")}</h2>
+            <p>{t("report.missingBody")}</p>
             <div className="preview-actions">
               <button className="primary-cta" type="button" onClick={() => navigate("/")}>
-                Back to map
+                {t("action.back")}
               </button>
             </div>
           </DialogSurface>
@@ -1307,13 +1311,13 @@ function FilterSheet({
 
   return (
     <DialogSurface ariaLabel={t("filters.dialogLabel")} className="filter-sheet" onClose={onClose}>
-      <button className="close-button" onClick={onClose} aria-label="Close filters">
+      <button className="close-button" onClick={onClose} aria-label={t("aria.closeFilters")}>
         <X size={18} />
       </button>
       <div className="sheet-title-row">
         <div>
           <p className="eyebrow">{t("filters.title")}</p>
-          <h2>Find reports faster</h2>
+          <h2>{t("filters.subtitle")}</h2>
         </div>
         <SlidersHorizontal size={20} />
       </div>
@@ -1328,7 +1332,7 @@ function FilterSheet({
           disabled={wardFilterState === "locating"}
         >
           {wardFilterState === "locating" ? <LoaderCircle className="spin" size={17} /> : <Layers size={17} />}
-          {wardFilterNumber != null ? `Showing Ward ${wardFilterNumber} - tap to change` : "Use my current location"}
+          {wardFilterNumber != null ? t("filters.showingWard", { ward: wardFilterNumber }) : t("filters.useMyLocation")}
         </button>
       </div>
       <label className="filter-field">
@@ -1364,7 +1368,7 @@ function FilterSheet({
           </select>
         </label>
         <label className="filter-field">
-          <span>Sort</span>
+          <span>{t("filters.sort")}</span>
           <select value={sortBy} onChange={(event) => setSortBy(event.target.value as "newest" | "upvotes" | "oldest")} aria-label={t("aria.sortReports")}>
             <option value="newest">{t("list.sortNewest")}</option>
             <option value="upvotes">{t("list.sortUpvoted")}</option>
@@ -1372,9 +1376,9 @@ function FilterSheet({
           </select>
         </label>
       </div>
-      <div className="filter-summary" aria-label="Active report filters">
+      <div className="filter-summary" aria-label={t("aria.activeFilters")}>
         <span>
-          <strong>{visibleCount}</strong> matching {visibleCount === 1 ? "report" : "reports"}
+          {visibleCount === 1 ? t("filters.oneMatch", { count: visibleCount }) : t("filters.manyMatches", { count: visibleCount })}
         </span>
         {activeFilterCount > 0 ? (
           <div>
@@ -1383,7 +1387,7 @@ function FilterSheet({
             ))}
           </div>
         ) : (
-          <p>No filters active.</p>
+          <p>{t("filters.noneActive")}</p>
         )}
       </div>
       <div className="filter-actions">
@@ -1393,7 +1397,7 @@ function FilterSheet({
         </button>
         <button type="button" className="secondary-cta" onClick={() => void onRefresh()} disabled={refreshing}>
           {refreshing ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
-          Refresh
+          {t("action.refresh")}
         </button>
         <button type="button" className="primary-cta" onClick={onApply}>
           {t("filters.apply")}
@@ -1427,6 +1431,7 @@ function InsightsSheet({
   onOpenWard: (wardNumber: number) => void;
 }) {
   const activeShare = Math.round((unresolvedCount / Math.max(1, reports.length)) * 100);
+  const scopeSuffix = hasActiveFilters ? ` ${t("insights.inView")}` : "";
   const priorityQueue = useMemo(() => {
     return visibleReports
       .filter((report) => report.status !== "resolved")
@@ -1439,43 +1444,45 @@ function InsightsSheet({
       });
   }, [visibleReports]);
   const priorityReports = priorityQueue.slice(0, 4);
-  const scopeSuffix = hasActiveFilters ? " in current view" : "";
 
   return (
-    <DialogSurface ariaLabel="Amma Odisha insights" className="insights-sheet" onClose={onClose}>
+    <DialogSurface ariaLabel={t("aria.insightsDialog")} className="insights-sheet" onClose={onClose}>
         <button className="sheet-back-button" type="button" onClick={onClose}>
           <ChevronLeft size={16} />
-          Back to map
+          {t("action.back")}
         </button>
-        <button className="close-button" onClick={onClose} aria-label="Close insights">
+        <button className="close-button" onClick={onClose} aria-label={t("aria.closeInsights")}>
           <X size={18} />
         </button>
         <div className="sheet-title-row">
           <div>
-            <p className="eyebrow">Public Accountability</p>
+            <p className="eyebrow">{t("insights.eyebrow")}</p>
             <h2>{t("insights.title")}</h2>
           </div>
           <Trophy size={20} />
         </div>
         <p className="muted">
-          Showing {visibleReports.length} reports{filteredWardNumber ? ` in Ward ${filteredWardNumber}` : ""}. Every report is mapped to a ward and linked to civic accountability.
+          {t("insights.showing", {
+            count: visibleReports.length,
+            scope: filteredWardNumber != null ? ` · ${t("ward.label", { ward: filteredWardNumber })}` : ""
+          })}
         </p>
 
         <div className="metric-grid insights-metrics">
-          <Metric label="Active" value={unresolvedCount} />
-          <Metric label="Resolved" value={resolvedCount} />
-          <Metric label="Still Open" value={`${activeShare}%`} />
+          <Metric label={t("stats.active")} value={unresolvedCount} />
+          <Metric label={t("stats.cleaned")} value={resolvedCount} />
+          <Metric label={t("stats.stillOpen")} value={`${activeShare}%`} />
         </div>
 
         <div className="accountability-card">
-          <h3>How pressure builds</h3>
-          <p>Citizens report a spot, others upvote it, and the issue stays visible with ward, MLA, and MP context until it is cleaned.</p>
+          <h3>{t("insights.pressure")}</h3>
+          <p>{t("insights.pressureBody")}</p>
         </div>
 
         <div className="priority-queue">
           <div className="sheet-title-row compact">
-            <h3>Priority Queue{scopeSuffix}</h3>
-            <span className="pill red">{priorityQueue.length} active</span>
+            <h3>{t("insights.queue")}{scopeSuffix}</h3>
+            <span className="pill red">{t("insights.activeCount", { count: priorityQueue.length })}</span>
           </div>
           {priorityReports.length ? (
             priorityReports.map((report) => {
@@ -1486,7 +1493,7 @@ function InsightsSheet({
                   key={report.id}
                   type="button"
                   onClick={() => onOpenReport(report)}
-                  aria-label={`Open priority report in Ward ${report.ward_number}`}
+                  aria-label={t("aria.openPriorityReport", { ward: report.ward_number })}
                 >
                   <span className="priority-report-severity" style={{ color: severity.color }}>
                     <SeverityMark severityKey={report.severity} />
@@ -1494,25 +1501,25 @@ function InsightsSheet({
                   <span className="priority-report-main">
                     <strong>{report.address}</strong>
                     <small>
-                      Ward {report.ward_number} - {severityLabel(report.severity)} - {daysActive(report.created_at)} days open
+                      {t("ward.label", { ward: report.ward_number })} - {severityLabel(report.severity)} - {t("detail.daysOpen", { count: daysActive(report.created_at) })}
                     </small>
                   </span>
                   <span className="priority-report-score">
                     <strong>{report.upvote_count ?? 0}</strong>
-                    <small>upvotes</small>
+                    <small>{t("units.upvotes", { count: report.upvote_count ?? 0 })}</small>
                   </span>
                 </button>
               );
             })
           ) : (
-            <p className="empty">No active reports match this view.</p>
+            <p className="empty">{t("insights.noQueue")}</p>
           )}
         </div>
 
         <div className="leaderboard">
           <div className="sheet-title-row compact">
-            <h3>Worst Wards by Active Reports{scopeSuffix}</h3>
-            <span className="pill red">{worstWards.length} wards</span>
+            <h3>{t("insights.worst")}{scopeSuffix}</h3>
+            <span className="pill red">{t("insights.wardCount", { count: worstWards.length })}</span>
           </div>
           {worstWards.length ? (
             worstWards.slice(0, 6).map((item, index) => {
@@ -1525,7 +1532,7 @@ function InsightsSheet({
                 >
                   <span className="ward-bar-rank">{index + 1}</span>
                   <span className="ward-bar-info">
-                    <strong>Ward {item.ward.ward_number}</strong>
+                    <strong>{t("ward.label", { ward: item.ward.ward_number })}</strong>
                     <small>{wardName || "Bhubaneswar"}</small>
                   </span>
                   <span className="ward-bar-track">
@@ -1534,7 +1541,7 @@ function InsightsSheet({
                       style={{
                         width: `${Math.round((item.count / Math.max(1, worstWards[0].count)) * 100)}%`
                       }}
-                      aria-label={`${item.count} active reports`}
+                      aria-label={t("map.manyActiveReports", { count: item.count })}
                     />
                     <b>{item.count}</b>
                   </span>
@@ -1542,7 +1549,7 @@ function InsightsSheet({
               );
             })
           ) : (
-            <p className="empty">No active ward hotspots right now.</p>
+            <p className="empty">{t("insights.noWards")}</p>
           )}
         </div>
     </DialogSurface>
@@ -1551,33 +1558,33 @@ function InsightsSheet({
 
 function IntroOverlay({ mlaCount, mpCount, onClose, onStartReport, wardCount }: { mlaCount: number; mpCount: number; onClose: () => void; onStartReport: () => void; wardCount: number }) {
   const statsLabel = [
-    wardCount > 0 ? `${wardCount} wards` : "",
-    mlaCount > 0 ? `${mlaCount} MLA${mlaCount === 1 ? "" : "s"}` : "",
-    mpCount > 0 ? `${mpCount} MP${mpCount === 1 ? "" : "s"}` : "",
-    "All of Bhubaneswar"
+    wardCount > 0 ? t("intro.statsWards", { count: wardCount }) : "",
+    mlaCount > 0 ? t("intro.statsMlas", { count: mlaCount }) : "",
+    mpCount > 0 ? t("intro.statsMps", { count: mpCount }) : "",
+    t("intro.body2")
   ]
     .filter(Boolean)
     .join(" · ");
 
   return (
-    <DialogSurface layerClassName="intro-nudge" className="intro-card" ariaLabel="Amma Odisha intro" onClose={onClose}>
-      <button className="toast-close" onClick={onClose} aria-label="Dismiss intro">
+    <DialogSurface layerClassName="intro-nudge" className="intro-card" ariaLabel={t("aria.introDialog")} onClose={onClose}>
+      <button className="toast-close" onClick={onClose} aria-label={t("aria.dismissIntro")}>
         <X size={12} />
       </button>
       <IntroHeroImage />
       <div className="intro-card-body">
         <img src="/logo.png" alt="" />
-        <p className="eyebrow">Bhubaneswar (BMC)</p>
+        <p className="eyebrow">{t("intro.eyebrow")}</p>
         <h2>{t("appTagline")}</h2>
-        <p>Every garbage dump is mapped, photographed, and linked to the responsible ward, MLA, and MP.</p>
-        <p className="intro-action-copy">Tap a red dot on the map to see a report, or start a new one.</p>
+        <p>{t("intro.lede")}</p>
+        <p className="intro-action-copy">{t("intro.body1")}</p>
         <b>{statsLabel}</b>
-        <button className="primary-cta intro-report-cta" onClick={onStartReport} aria-label="Report a garbage dump near you">
+        <button className="primary-cta intro-report-cta" onClick={onStartReport} aria-label={t("aria.reportCta")}>
           <Plus size={16} />
-          Report garbage near me
+          {t("intro.ctaReport")}
         </button>
         <button className="intro-explore-link" onClick={onClose} type="button">
-          Start using map
+          {t("intro.ctaStart")}
         </button>
       </div>
     </DialogSurface>
@@ -1595,7 +1602,7 @@ function IntroHeroImage() {
     );
   }
 
-  return <img className="intro-hero-image" src="/garbage-hero.jpg" alt="Garbage on streets of Bhubaneswar" onError={() => setFailed(true)} />;
+  return <img className="intro-hero-image" src="/garbage-hero.jpg" alt={t("intro.heroAlt")} onError={() => setFailed(true)} />;
 }
 
 function ReportList({
@@ -1645,10 +1652,10 @@ function ReportList({
     <div className="report-list" aria-busy={refreshing}>
       <div className="report-list-header">
         <div>
-          <p className="eyebrow">Live Reports</p>
-          <h2>{reports.length} visible issues</h2>
+          <p className="eyebrow">{t("list.header")}</p>
+          <h2>{t("list.visible", { count: reports.length })}</h2>
         </div>
-        <span className="pill red">Public</span>
+        <span className="pill red">{t("list.publicBadge")}</span>
       </div>
       {refreshing ? (
         <ReportListSkeleton count={6} />
@@ -1672,12 +1679,12 @@ function ReportList({
           </p>
           <p className="empty">
             {hasActiveFilters
-              ? `Try a different search, status, or ward filter. There are ${totalReports} total reports available.`
+              ? t("list.tryOther", { count: totalReports })
               : emptyDescription ?? t("list.emptyArea")}
           </p>
           {hasActiveFilters && onClearFilters && (
             <button className="secondary-cta" type="button" onClick={onClearFilters}>
-              Clear filters
+              {t("action.clearFilters")}
             </button>
           )}
         </div>
@@ -1718,7 +1725,8 @@ function ReportListItem({
   const upvoteCount = report.upvote_count ?? 0;
   const severityText = severityLabel(report.severity);
   const statusText = t(report.status === "resolved" ? "status.resolvedShort" : "status.unresolvedShort");
-  const tagLabel = `${severityText}, ${statusText}${mla ? `, MLA: ${mla.name}` : ""}`;
+  const upvotesText = upvoteCount === 1 ? t("units.oneUpvote", { count: upvoteCount }) : t("units.upvotes", { count: upvoteCount });
+  const tagLabel = `${severityText}, ${statusText}${mla ? `, ${t("route.targetMla", { name: mla.name })}` : ""}`;
   const days = daysOpen(report);
   const escLevel = escalationLevel(days);
   const escalationText = escLevel >= 3 ? t("escalation.dotAria", { label: t(`escalation.level${escLevel}`), days }) : "";
@@ -1728,7 +1736,7 @@ function ReportListItem({
       onClick={() => onSelect(report)}
       onFocus={() => preloadImage(report.photo_url)}
       onPointerEnter={() => preloadImage(report.photo_url)}
-      aria-label={`${wardName || report.address} — ${severityText} garbage, ${statusText}, ${upvoteCount} ${upvoteCount === 1 ? "upvote" : "upvotes"}${escalationText ? `, ${escalationText}` : ""}`}
+      aria-label={`${wardName || report.address} — ${severityText} garbage, ${statusText}, ${upvotesText}${escalationText ? `, ${escalationText}` : ""}`}
     >
       <ReportPhoto
         src={report.photo_url}
@@ -1739,14 +1747,14 @@ function ReportListItem({
         width={report.photo_width}
         height={report.photo_height}
       />
-      <span className="report-item-badge" aria-label={`${upvoteCount} ${upvoteCount === 1 ? "upvote" : "upvotes"}`}>
+      <span className="report-item-badge" aria-label={upvotesText}>
         <strong>{upvoteCount}</strong>
-        <small>{upvoteCount === 1 ? "upvote" : "upvotes"}</small>
+        <small>{upvoteCount === 1 ? t("units.oneUpvote", { count: upvoteCount }) : t("units.upvotes", { count: upvoteCount })}</small>
       </span>
       <span className="report-item-body">
         <strong>{wardName || report.address}</strong>
         <small>
-          {report.address}{wardName ? ` · Ward #${report.ward_number}` : ""} · {timeAgoI18n(report.created_at, t)}
+          {report.address}{wardName ? ` · ${t("ward.label", { ward: report.ward_number })}` : ""} · {timeAgoI18n(report.created_at, t)}
         </small>
       </span>
       <span className="report-item-tags" aria-label={tagLabel}>
@@ -1855,7 +1863,7 @@ function getWorstWards(reports: GarbageReport[], wards: Ward[]) {
 }
 
 function ReportDetail({
-  backLabel = "Back to map",
+  backLabel = t("action.back"),
   report,
   data,
   onBack,
@@ -1978,30 +1986,21 @@ function ReportDetail({
     });
     setExternalPreview({
       action: { kind: "whatsapp", value: text },
-      confirmLabel: "Open WhatsApp",
-      details: text,
-      helper: "This opens WhatsApp with a ready-to-send message. You can review or edit it before sending.",
-      title: "Send complaint on WhatsApp"
+      details: text
     });
   };
 
   const prepareDirections = () => {
     setExternalPreview({
       action: { kind: "maps", value: `${report.latitude},${report.longitude}` },
-      confirmLabel: "Open Maps",
-      details: `${report.address}\nWard ${report.ward_number}\n${report.latitude}, ${report.longitude}`,
-      helper: "This opens Google Maps in a new tab so you can navigate to the reported spot.",
-      title: "Open directions"
+      details: `${report.address}\n${t("ward.label", { ward: report.ward_number })}\n${report.latitude}, ${report.longitude}`
     });
   };
 
   const prepareCall = (label: string, value: string) => {
     setExternalPreview({
-      action: { kind: "tel", value },
-      confirmLabel: "Call now",
-      details: value,
-      helper: `This will start a phone call to ${label}.`,
-      title: `Call ${label}`
+      action: { kind: "tel", value, label },
+      details: value
     });
   };
 
@@ -2019,7 +2018,7 @@ function ReportDetail({
 
   return (
     <DialogSurface
-      ariaLabel="Report details"
+      ariaLabel={t("aria.reportDetails")}
       className="detail-sheet"
       onClose={onClose}
       disableEscape={showResolve || Boolean(externalPreview)}
@@ -2066,7 +2065,7 @@ function ReportDetail({
             <button className="detail-icon-btn" onClick={() => void shareReport()} aria-label={t("aria.shareReport")}>
               <Share2 size={17} />
             </button>
-            <button className="detail-icon-btn" onClick={onClose} aria-label="Close report detail">
+            <button className="detail-icon-btn" onClick={onClose} aria-label={t("aria.closeReportDetail")}>
               <X size={17} />
             </button>
           </div>
@@ -2074,7 +2073,7 @@ function ReportDetail({
 
         {/* ── Title + location ── */}
         <div className="detail-title-area">
-          <h2>{ward?.locality_name?.trim() || getDistinctWardName(ward) || ward?.ward_name || `Ward ${report.ward_number}`}</h2>
+          <h2>{ward?.locality_name?.trim() || getDistinctWardName(ward) || ward?.ward_name || t("ward.label", { ward: report.ward_number })}</h2>
           <p className="detail-location">
             <MapPin size={13} />
             {report.address}
@@ -2085,7 +2084,7 @@ function ReportDetail({
         <div className="detail-photo-wrap">
           <ReportPhoto
             src={report.photo_url}
-            alt="Garbage report"
+            alt={t("aria.reportPhoto")}
             variant="detail"
             width={report.photo_width}
             height={report.photo_height}
@@ -2110,9 +2109,9 @@ function ReportDetail({
             </span>
           )}
           <p className="trust-dates">
-            {t("detail.reportedOn", { date: shortDate(report.created_at) })}
+            {t("detail.reportedOn", { date: shortDateI18n(report.created_at, t) })}
             {report.status === "resolved" && report.resolved_at && (
-              <> · {t("detail.cleanedOn", { date: shortDate(report.resolved_at) })}</>
+              <> · {t("detail.cleanedOn", { date: shortDateI18n(report.resolved_at, t) })}</>
             )}
           </p>
           {(report.resolved_by_name || report.photo_credit || report.photo_source_url) && (
@@ -2139,17 +2138,17 @@ function ReportDetail({
         <div className="detail-stats-row">
           <div className="detail-stat">
             <strong style={{ color: severity.color }}>{report.upvote_count ?? 0}</strong>
-            <span>Reports</span>
+            <span>{t("detail.statReports")}</span>
           </div>
           <div className="detail-stat-divider" aria-hidden="true" />
           <div className="detail-stat">
             <strong style={{ color: "#f97316" }}>{daysActive(report.created_at)}</strong>
-            <span>Days</span>
+            <span>{t("detail.statDays")}</span>
           </div>
           <div className="detail-stat-divider" aria-hidden="true" />
           <div className="detail-stat detail-stat-text">
             <strong style={{ color: "var(--blue)" }}>{CATEGORIES[report.category]}</strong>
-            <span>Waste Type</span>
+            <span>{t("detail.statCategory")}</span>
           </div>
         </div>
 
@@ -2157,22 +2156,22 @@ function ReportDetail({
         <div className="detail-content">
           {alreadyVotedNote && (
             <p className="already-voted-note" role="status">
-              You already supported this report from another device.
+              {t("detail.alreadyVoted")}
             </p>
           )}
           {upvoteFailedNote && (
             <p className="already-voted-note" role="alert">
-              Your vote could not be recorded. Check your connection and try again.
+              {t("detail.voteFailed")}
             </p>
           )}
           {shareNote === "copied" && (
             <p className="already-voted-note" role="status">
-              Copied to clipboard.
+              {t("action.copied")}
             </p>
           )}
           {shareNote === "error" && (
             <p className="warning-text" role="alert">
-              Sharing failed. Check your connection and try again.
+              {t("detail.shareFailed")}
             </p>
           )}
           {report.moderation_status === "flagged" && (
@@ -2180,9 +2179,9 @@ function ReportDetail({
               <ShieldCheck size={16} />
               <span>
                 {report.moderation_metadata?.cleanup_pending ? (
-                  <><strong>Cleanup proof submitted</strong> Admin is reviewing your cleanup photo. The report will be marked resolved once approved.</>
+                  <><strong>{t("detail.cleanupSubmitted")}</strong> {t("detail.cleanupReviewBody")}</>
                 ) : (
-                  <><strong>Pending review</strong> Visible to you now. It becomes public once the photo is approved.</>
+                  <><strong>{t("detail.pendingReview")}</strong> {t("detail.pendingBody")}</>
                 )}
               </span>
             </div>
@@ -2196,39 +2195,39 @@ function ReportDetail({
                 onClick={() => compareRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
               >
                 <CheckCircle2 size={13} />
-                See cleanup photo
+                {t("detail.compareToggle")}
                 <ChevronDown size={13} />
               </button>
-              <section ref={compareRef} className="resolved-compare" aria-label="Before and after cleanup photos">
+              <section ref={compareRef} className="resolved-compare" aria-label={t("detail.compareTitle")}>
                 <div className="sheet-title-row compact">
-                  <h3>Before and after</h3>
-                  <span className="pill green">Cleaned</span>
+                  <h3>{t("detail.compareTitle")}</h3>
+                  <span className="pill green">{t("status.cleaned")}</span>
                 </div>
                 <div className="photo-compare">
-                  <img src={report.photo_url ?? ""} alt="Before cleanup" />
+                  <img src={report.photo_url ?? ""} alt={t("detail.before")} />
                   <div className="photo-compare-after" style={{ clipPath: `inset(0 ${100 - compareValue}% 0 0)` }}>
-                    <img src={report.resolved_photo_url ?? ""} alt="After cleanup" />
+                    <img src={report.resolved_photo_url ?? ""} alt={t("detail.after")} />
                   </div>
-                  <span className="compare-label before">Before</span>
-                  <span className="compare-label after">After</span>
+                  <span className="compare-label before">{t("detail.before")}</span>
+                  <span className="compare-label after">{t("detail.after")}</span>
                 </div>
                 <label className="compare-slider">
-                  <span>Slide to compare</span>
+                  <span>{t("detail.slideHint")}</span>
                   <input
                     type="range"
                     min="15"
                     max="85"
                     value={compareValue}
                     onChange={(event) => setCompareValue(Number(event.target.value))}
-                    aria-valuetext={`${compareValue}% cleaned`}
-                    aria-label="Before and after cleanup comparison"
+                    aria-valuetext={t("detail.percentCleaned", { count: compareValue })}
+                    aria-label={t("detail.compareTitle")}
                   />
                 </label>
               </section>
             </>
           )}
 
-          <h3>Accountability</h3>
+          <h3>{t("detail.accountability")}</h3>
           <div className="rep-grid">
             <RepCard label="MLA" rep={mla} area={ward?.assembly_constituency} onClick={() => mla && openProfile({ type: "mla", id: mla.constituency })} />
             <RepCard label="MP" rep={mp} area={ward?.parliamentary_constituency} onClick={() => mp && openProfile({ type: "mp", id: mp.constituency })} />
@@ -2242,21 +2241,21 @@ function ReportDetail({
             <div className="contact-panel">
               <div className="contact-heading">
                 <MessageCircle size={15} />
-                <span>Contact BMC</span>
-                <span>Visible now</span>
+                <span>{t("detail.contactBmc")}</span>
+                <span>{t("detail.contactVisible")}</span>
               </div>
               <div className="contact-actions">
                 <button onClick={prepareComplaint}>
                   <MessageCircle size={16} />
-                  WhatsApp BMC
+                  {t("detail.whatsappBmc")}
                 </button>
                 <button onClick={() => prepareCall("BMC", BMC_NUMBER)}>
                   <Phone size={16} />
                   {t("action.callBmc")}
                 </button>
-                <button onClick={() => prepareCall("Helpline 1929", BMC_HELPLINE)}>
+                <button onClick={() => prepareCall(t("detail.helpline"), BMC_HELPLINE)}>
                   <Phone size={16} />
-                  Helpline 1929
+                  {t("detail.helpline")}
                 </button>
               </div>
             </div>
@@ -2264,14 +2263,14 @@ function ReportDetail({
               <div className="resolve-action-group">
                 <button className="green-action" onClick={() => setShowResolve(true)}>
                   <CheckCircle2 size={16} />
-                  Submit Cleanup Proof
+                  {t("resolve.submitProof")}
                 </button>
-                <small>You must be at the spot. Take a photo as proof — admin will review before the report is marked cleaned.</small>
+                <small>{t("detail.proofHelper")}</small>
               </div>
             )}
           </div>
           <p className="anonymous">
-            <ShieldCheck size={13} /> All reports are anonymous
+            <ShieldCheck size={13} /> {t("detail.anonymous")}
           </p>
         </div>
       {showResolve && <ResolveModal report={report} onClose={() => setShowResolve(false)} onResolved={onUpdate} />}
@@ -2321,9 +2320,9 @@ function RepCard({ label, rep, area, onClick }: { label: string; rep?: Represent
       <Avatar rep={rep} />
       <span>
         <small>{label}</small>
-        <strong>{rep?.name ?? "Not mapped"}</strong>
+        <strong>{rep?.name ?? t("profile.notMapped")}</strong>
         <em>
-          {rep?.party ?? "—"} · {area ?? "Unknown"}
+          {rep?.party ?? "—"} · {area ?? t("profile.unknownArea")}
         </em>
       </span>
       <ArrowUpRight size={14} />
@@ -2440,7 +2439,7 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
       onClose();
     } catch (caught) {
       setUploadProgress(null);
-      setSaveError(caught instanceof Error ? caught.message : "Save failed. Please try again.");
+      setSaveError(caught instanceof Error ? caught.message : t("resolve.saveFailed"));
       setStatus("error");
     }
   };
@@ -2459,27 +2458,31 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
   const canSave = status === "verified" || status === "error";
 
   return (
-    <DialogSurface layerClassName="nested-modal" className="mini-card" ariaLabel="Mark report as cleaned" onClose={onClose}>
+    <DialogSurface layerClassName="nested-modal" className="mini-card" ariaLabel={t("resolve.title")} onClose={onClose}>
         <button className="sheet-back-button" type="button" onClick={onClose}>
           <ChevronLeft size={16} />
-          Back to report
+          {t("route.backReport")}
         </button>
-        <button className="close-button" onClick={onClose} aria-label="Close resolve modal">
+        <button className="close-button" onClick={onClose} aria-label={t("aria.closeResolve")}>
           <X size={18} />
         </button>
         <h2>{t("resolve.title")}</h2>
-        <p>First confirm you are near the spot, then add the cleanup photo.</p>
+        <p>{t("resolve.verifyHelper")}</p>
         <div className={clsx("notice resolve-distance-notice", status === "verified" ? "success" : "amber")}>
           {status === "verified" ? <CheckCircle2 size={16} /> : status === "locating" ? <LoaderCircle className="spin" size={16} /> : <CircleAlert size={16} />}
           <span>
             <strong>
-              {status === "verified" ? "You are close enough" : status === "locating" ? "Checking your distance" : "Move closer to the reported spot"}
+              {status === "verified"
+                ? t("resolve.distanceOk")
+                : status === "locating"
+                  ? t("resolve.checkingDistance")
+                  : t("resolve.moveCloserTitle")}
             </strong>
             {status === "verified"
-              ? `Distance confirmed at about ${Math.max(1, Math.round(verifiedPosition?.distanceMeters ?? 0))}m.`
+              ? t("resolve.distanceConfirmed", { count: Math.max(1, Math.round(verifiedPosition?.distanceMeters ?? 0)) })
               : status === "mismatch" && failedDistance != null
-                ? `You appear to be about ${Math.round(failedDistance)}m away. Move closer to the spot (within 500m) and try again.`
-                : "You must be within 500m before uploading the cleaned photo."}
+                ? t("resolve.distanceFailed", { count: Math.round(failedDistance) })
+                : t("resolve.within500")}
           </span>
         </div>
         <label
@@ -2491,12 +2494,12 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
           aria-disabled={status !== "verified" && status !== "mismatch" ? "true" : undefined}
         >
           {preview ? <img src={preview} alt="" /> : <Camera size={28} />}
-          <span>{preview ? "Change cleanup photo" : "Add cleanup photo"}</span>
-          <small>Take a new photo or choose from your gallery.</small>
+          <span>{preview ? t("resolve.changeCleanupPhoto") : t("resolve.addCleanupPhoto")}</span>
+          <small>{t("form.photoHint")}</small>
           <input
             type="file"
             accept="image/*"
-            aria-label="Upload cleanup proof photo"
+            aria-label={t("aria.uploadProof")}
             disabled={status !== "verified" && status !== "mismatch"}
             onChange={(event) => onFile(event.target.files?.[0])}
           />
@@ -2504,19 +2507,19 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
         {status === "saving" && uploadProgress != null && (
           <div className="upload-progress-panel" role="status">
             <span>
-              <strong>Uploading cleanup photo</strong>
+              <strong>{t("resolve.uploadingCleanup")}</strong>
               {Math.round(uploadProgress)}%
             </span>
-            <UploadProgressBar label="Cleanup photo upload progress" value={uploadProgress} />
+            <UploadProgressBar label={t("resolve.uploadProgressAria")} value={uploadProgress} />
           </div>
         )}
         <button className="primary-cta" onClick={() => void saveVerification()} disabled={isBusy || !canSave}>
           {isBusy ? <LoaderCircle className="spin" size={17} /> : <CheckCircle2 size={17} />}
           {status === "verified" && t("resolve.submit")}
-          {status === "locating" && "Verifying your location..."}
-          {status === "saving" && "Saving verification..."}
-          {status === "error" && "Try saving again"}
-          {status === "mismatch" && "Move closer first"}
+          {status === "locating" && t("resolve.verifying")}
+          {status === "saving" && t("resolve.saving")}
+          {status === "error" && t("resolve.trySaveAgain")}
+          {status === "mismatch" && t("resolve.moveCloserFirst")}
         </button>
         {canRetry && status !== "error" && (
           <button className="secondary-cta" type="button" onClick={checkProximity}>
@@ -2525,14 +2528,14 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
         )}
         {status === "mismatch" && (
           <div className="resolve-fallback">
-            <p>Can't get close enough? Submit your cleanup photo without GPS verification — it will be flagged for manual review.</p>
+            <p>{t("resolve.photoOnlyHelper")}</p>
             <button
               className="secondary-cta"
               type="button"
               disabled={!photo || isBusy}
               onClick={() => void saveVerification(true)}
             >
-              {photo ? "Submit with photo only (unverified)" : "Select a cleanup photo above to continue"}
+              {photo ? t("resolve.photoOnlySubmit") : t("resolve.selectPhotoFirst")}
             </button>
           </div>
         )}
@@ -2554,43 +2557,58 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
 
 function ExternalAppPreview({ config, onClose, onConfirm }: { config: ExternalPreviewConfig; onClose: () => void; onConfirm: () => void }) {
   const isWhatsAppPreview = config.action.kind === "whatsapp";
+  const isMapsPreview = config.action.kind === "maps";
+  const callLabel = config.action.kind === "tel" ? config.action.label : "";
+  const title = isWhatsAppPreview
+    ? t("preview.titleWhatsapp")
+    : isMapsPreview
+      ? t("preview.titleMaps")
+      : t("preview.titleCall", { label: callLabel });
+  const helper = isWhatsAppPreview
+    ? t("preview.body")
+    : isMapsPreview
+      ? t("preview.bodyMaps")
+      : t("preview.bodyCall", { label: callLabel });
+  const confirmLabel = isWhatsAppPreview
+    ? t("preview.confirm")
+    : isMapsPreview
+      ? t("preview.confirmMaps")
+      : t("action.call");
 
   return (
-    <DialogSurface layerClassName="nested-modal" className="mini-card external-preview" ariaLabel={config.title} onClose={onClose}>
+    <DialogSurface layerClassName="nested-modal" className="mini-card external-preview" ariaLabel={title} onClose={onClose}>
       <button className="sheet-back-button" type="button" onClick={onClose}>
         <ChevronLeft size={16} />
-        Back to report
+        {t("route.backReport")}
       </button>
-      <button className="close-button" onClick={onClose} aria-label="Close WhatsApp preview">
+      <button className="close-button" onClick={onClose} aria-label={t("aria.closePreview")}>
         <X size={18} />
       </button>
-      <h2>{config.title}</h2>
-      <p>{config.helper}</p>
+      <h2>{title}</h2>
+      <p>{helper}</p>
       {isWhatsAppPreview ? (
         <div className="whatsapp-bubble-preview">
           <div className="whatsapp-bubble-header">
             <span className="whatsapp-sender-dot" aria-hidden="true" />
-            <span className="whatsapp-sender-name">Amma Odisha -&gt; BMC</span>
+            <span className="whatsapp-sender-name">{t("preview.bubble")}</span>
           </div>
           <div className="whatsapp-bubble-body">
             {config.details.split("\n").map((line, index) => (
               line.trim() ? <p key={index}>{line}</p> : <br key={index} />
             ))}
           </div>
-          <p className="whatsapp-bubble-hint">
-            You can review and edit this message in WhatsApp before sending.
-          </p>
+          <p className="whatsapp-bubble-hint">{t("preview.hint")}</p>
         </div>
       ) : (
         <pre>{config.details}</pre>
       )}
       <div className="preview-actions">
         <button className="secondary-cta" type="button" onClick={onClose}>
-          Not now
+          {t("preview.cancel")}
         </button>
         <button className="primary-cta" type="button" onClick={onConfirm}>
           <ArrowUpRight size={16} />
-          {config.confirmLabel}
+          {confirmLabel}
         </button>
       </div>
     </DialogSurface>
@@ -2601,7 +2619,7 @@ function DiscardReportDialog({ onCancel, onConfirm }: { onCancel: () => void; on
   return (
     <DialogSurface layerClassName="nested-modal" className="mini-card discard-dialog" ariaLabel={t("form.discardTitle")} onClose={onCancel}>
       <h2>{t("form.discardTitle")}</h2>
-      <p>Your photo and details will be lost.</p>
+      <p>{t("form.discardBody")}</p>
       <div className="preview-actions">
         <button className="secondary-cta" type="button" onClick={onCancel}>
           {t("form.keepEditing")}
@@ -2674,7 +2692,7 @@ function MyReportsSheet({ reports, reportsUnavailable = false, onRetry, navigate
               <span className="my-report-info">
                 <strong>{report?.address || entry.address || entry.title}</strong>
                 <small>
-                  {shortDate(entry.createdAt)}
+                  {shortDateI18n(entry.createdAt, t)}
                   {entry.title ? ` · ${entry.title}` : ""}
                 </small>
               </span>
@@ -2964,16 +2982,16 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
     (step: ReportFormStep) => {
       const nextFieldErrors: Partial<Record<ReportFieldKey, string>> = {};
       if (step === 1 && !selectedWard) {
-        nextFieldErrors.ward = "Search for your area and tap a result to continue.";
+        nextFieldErrors.ward = t("form.errWard");
       }
       if (step === 2) {
-        if (!photo) nextFieldErrors.photo = "Add a clear photo of the garbage spot.";
-        if (!address.trim()) nextFieldErrors.address = "Add a nearby landmark or address so others can find the spot.";
+        if (!photo) nextFieldErrors.photo = t("form.errPhoto");
+        if (!address.trim()) nextFieldErrors.address = t("form.errAddress");
       }
 
       if (Object.keys(nextFieldErrors).length) {
         setFieldErrors((current) => ({ ...current, ...nextFieldErrors }));
-        announce(Object.values(nextFieldErrors)[0] ?? "Complete the required fields to continue.");
+        announce(Object.values(nextFieldErrors)[0] ?? t("form.errRequired"));
         return false;
       }
 
@@ -3062,32 +3080,32 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
   };
 
   const locationHelp = (() => {
-    if (locationState === "locating") return "Your browser may ask for permission - we only use it for this report.";
-    if (locationState === "detecting") return "Matching your coordinates to the local ward boundary...";
-    if (locationState === "detected") return `Detected Ward ${selectedWard?.ward_number ?? ""}. You can still change it manually.`;
-    if (locationState === "outside") return "Your location appears to be outside Bhubaneswar. Search manually below.";
-    if (locationState === "denied") return "Location access was denied. Type a nearby market or colony name below.";
-    if (locationState === "unavailable") return "Location not available in this browser. Choose your area manually.";
-    if (locationState === "manual" && selectedWard) return "Area selected manually.";
-    if (locationState === "manual") return "We couldn't detect your area. Please search below.";
-    return "We'll find your neighbourhood and match it to the right area.";
+    if (locationState === "locating") return t("form.helpLocating");
+    if (locationState === "detecting") return t("form.helpDetecting");
+    if (locationState === "detected") return t("form.helpDetected", { ward: selectedWard?.ward_number ?? "" });
+    if (locationState === "outside") return t("form.helpOutside");
+    if (locationState === "denied") return t("form.helpDenied");
+    if (locationState === "unavailable") return t("form.helpUnavailable");
+    if (locationState === "manual" && selectedWard) return t("form.helpManualSelected");
+    if (locationState === "manual") return t("form.helpManual");
+    return t("form.helpIdle");
   })();
   const needsWardSearchGuidance = ["denied", "outside", "unavailable", "manual"].includes(locationState) && !selectedWard;
 
   const submitProgressText =
     submitStage === "uploading"
-      ? "Uploading photo..."
+      ? t("form.stageUploading")
       : submitStage === "saving"
-        ? "Saving report..."
-        : "Submitting...";
+        ? t("form.stageSaving")
+        : t("action.submitting");
 
   const submit = async () => {
     if (submitSuccess) return;
     setFormError("");
     setSlowSubmit(false);
     if (!limit.allowed) {
-      setFormError("Daily report limit reached. Please try again tomorrow.");
-      announce("Daily report limit reached. Please try again tomorrow.");
+      setFormError(t("form.errDailyLimit"));
+      announce(t("form.errDailyLimit"));
       return;
     }
     if (!validateStep(1)) {
@@ -3162,25 +3180,25 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
   };
 
   return (
-    <DialogSurface ariaLabel="Report garbage" className="form-sheet" disableEscape={showDiscardConfirm || Boolean(pendingViewReport)} onClose={requestClose}>
+    <DialogSurface ariaLabel={t("action.reportGarbage")} className="form-sheet" disableEscape={showDiscardConfirm || Boolean(pendingViewReport)} onClose={requestClose}>
       {formStep > 1 && (
         <button className="sheet-back-button form-back" type="button" onClick={goToPreviousStep}>
           <ChevronLeft size={16} />
-          Back
+          {t("form.back")}
         </button>
       )}
-      <button className="close-button" onClick={requestClose} aria-label="Close report form">
+      <button className="close-button" onClick={requestClose} aria-label={t("aria.closeForm")}>
         <X size={18} />
       </button>
       <div className="form-header">
         <div>
-          <p className="eyebrow">Garbage Report</p>
+          <p className="eyebrow">{t("form.eyebrow")}</p>
           <h2>{t("action.reportGarbage")}</h2>
           <p>
             <strong>{currentStepTitle}</strong>{" "}
-            {formStep === 1 && "Pick the area for this report."}
-            {formStep === 2 && "Add the proof people need to find the spot."}
-            {formStep === 3 && "Confirm the details before submitting."}
+            {formStep === 1 && t("form.step1Subtitle")}
+            {formStep === 2 && t("form.step2Subtitle")}
+            {formStep === 3 && t("form.step3Subtitle")}
           </p>
         </div>
       </div>
@@ -3193,7 +3211,7 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
           className="submit-success-screen"
           role="status"
           tabIndex={0}
-          aria-label="Report submitted."
+          aria-label={t("form.submitted")}
           style={{ cursor: "default" }}
         >
           <CheckCircle2 size={36} />
@@ -3202,7 +3220,7 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
           <p>
             {submittedReviewStatus === "approved"
               ? t("success.subtitle")
-              : "Thank you for your submission. We review every photo before it appears publicly. Misleading photos or information will be rejected by the admin."}
+              : t("success.note")}
           </p>
           {submittedReviewStatus === "approved" ? (
             <>
@@ -3233,21 +3251,21 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
             </button>
           )}
           {shareNote === "copied" && (
-            <p className="already-voted-note" role="status">Copied to clipboard.</p>
+            <p className="already-voted-note" role="status">{t("action.copied")}</p>
           )}
           {shareNote === "error" && (
-            <p className="warning-text" role="alert">Sharing failed. Check your connection and try again.</p>
+            <p className="warning-text" role="alert">{t("detail.shareFailed")}</p>
           )}
         </div>
       )}
       {!submitSuccess && (
         <>
-          <div className="form-progress" aria-label={`Report progress step ${formStep} of 3`}>
+          <div className="form-progress" aria-label={t("aria.formProgress", { step: formStep })}>
             <div>
-              <span>Step {formStep} of 3</span>
+              <span>{t("form.stepOf", { step: formStep })}</span>
               <strong>{progressLabel}</strong>
             </div>
-            <em>{formStep === 3 ? "Final check" : "Guided report"}</em>
+            <em>{formStep === 3 ? t("form.chipReview") : t("form.chipGuided")}</em>
             <i>
               <b style={{ width: `${(formStep / 3) * 100}%` }} />
             </i>
@@ -3256,8 +3274,8 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
         <div className="notice amber" role="alert">
           <CircleAlert size={16} />
           <span>
-            <strong>We are not live in your area yet</strong>
-            You can still browse reports and explore the map.
+            <strong>{t("form.notLiveTitle")}</strong>
+            {t("form.notLiveBody")}
           </span>
         </div>
       )}
@@ -3268,27 +3286,27 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
             <button className="detect-ward-action" onClick={detectWard} type="button" disabled={locationState === "locating" || locationState === "detecting"}>
               {locationState === "locating" || locationState === "detecting" ? <LoaderCircle className="spin" size={17} /> : <RefreshCw size={17} />}
               {locationState === "detected"
-                ? "Refresh location"
+                ? t("form.refreshLocation")
                 : locationState === "detecting"
-                  ? "Detecting your area..."
+                  ? t("form.detectWard")
                   : locationState === "locating"
-                    ? "Finding your location..."
-                    : "Use my current location"}
+                    ? t("form.locating")
+                    : t("form.useMyLocation")}
             </button>
             <span>
-              <strong>Fastest - works automatically</strong>
+              <strong>{t("form.fastestMethod")}</strong>
               <small>{locationHelp}</small>
             </span>
           </div>
           {needsWardSearchGuidance && (
             <div className="ward-recovery-callout" role="status">
-              <strong>Can't detect your area?</strong>
-              <span>Type the name of a nearby market, colony, or landmark - for example Unit 4, Sahid Nagar, or Nayapalli.</span>
+              <strong>{t("form.recoveryTitle")}</strong>
+              <span>{t("form.recoveryBody")}</span>
             </div>
           )}
           <div className="field">
             <label className="field-label" htmlFor="report-ward-search" id="report-step-ward">
-              Or search by name <b>*</b>
+              {t("form.searchByName")} <b>*</b>
             </label>
             <div
               className="ward-combobox"
@@ -3317,7 +3335,7 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
                     clearFieldError("ward");
                   }}
                   onKeyDown={onWardSearchKeyDown}
-                  placeholder="Neighbourhood, market, colony, or ward number"
+                   placeholder={t("form.searchPlaceholder")}
                   role="combobox"
                   aria-autocomplete="list"
                   aria-expanded={wardPickerOpen}
@@ -3332,10 +3350,10 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
                 />
               </div>
               {wardPickerOpen && (
-                <div className="ward-options" id="report-ward-options" role="listbox" aria-label="Matching wards">
+                <div className="ward-options" id="report-ward-options" role="listbox" aria-label={t("aria.matchingWards")}>
                   {wardSearch.trim() === "" && !selectedWard && (
                     <p className="ward-options-hint">
-                      Type a nearby market, colony, or ward number to search.
+                      {t("form.optionsHint")}
                     </p>
                   )}
                   {visibleWardOptions.length ? (
@@ -3363,7 +3381,7 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
                       );
                     })
                   ) : (
-                    <p>No matching areas. Try a ward number or locality.</p>
+                    <p>{t("form.noMatches")}</p>
                   )}
                 </div>
               )}
@@ -3371,7 +3389,7 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
             {selectedWard && (
               <p className="selected-ward" id="selected-ward" role="status">
                 <CheckCircle2 size={14} />
-                Found: {selectedWardLabel}
+                {t("form.found", { ward: selectedWardLabel })}
               </p>
             )}
             {fieldErrors.ward && (
@@ -3380,7 +3398,7 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
               </p>
             )}
           </div>
-          <p className="privacy-note">Your GPS coordinates are used only to identify the right area and are not shared publicly. Manual search still works if location is unavailable.</p>
+          <p className="privacy-note">{t("form.privacy")}</p>
         </section>
       )}
 
@@ -3388,7 +3406,7 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
         <section className="wizard-panel" aria-labelledby="report-step-evidence">
           <label className="field" id="report-step-evidence">
             <span>
-              Landmark / Address <b>*</b>
+              {t("form.addressLabel")} <b>*</b>
             </span>
             <input
               value={address}
@@ -3398,9 +3416,9 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
               }}
               aria-invalid={Boolean(fieldErrors.address)}
               aria-describedby={fieldErrors.address ? "report-address-error" : undefined}
-              placeholder="e.g., Near Unit 4 market, beside the temple"
+              placeholder={t("form.addressPlaceholder")}
             />
-            <small>Please add a landmark or address so others can find this spot.</small>
+            <small>{t("form.addressHelper")}</small>
             {fieldErrors.address && (
               <p className="field-error" id="report-address-error">
                 {fieldErrors.address}
@@ -3409,16 +3427,16 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
           </label>
           <div className="field">
             <span>
-              Photo <b>*</b>
+              {t("form.photoLabel")} <b>*</b>
             </span>
             <label className={clsx("photo-drop", photoPreview && "has-photo")}>
               {photoPreview ? <img src={photoPreview} alt="" /> : <Camera size={30} />}
-              <em>{photoPreview ? "Change photo" : "Add photo"}</em>
-              <small>Take a new photo or choose from your gallery.</small>
+              <em>{photoPreview ? t("form.changePhoto") : t("form.takePhoto")}</em>
+              <small>{t("form.photoHint")}</small>
               <input
                 type="file"
                 accept="image/*"
-                aria-label="Upload garbage photo"
+                aria-label={t("aria.uploadGarbagePhoto")}
                 aria-invalid={Boolean(fieldErrors.photo)}
                 aria-describedby={fieldErrors.photo ? "report-photo-error" : undefined}
                 onChange={(event) => onFile(event.target.files?.[0])}
@@ -3426,7 +3444,7 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
             </label>
             {photoPreview && (
               <button className="tiny-action remove-photo" type="button" onClick={removePhoto}>
-                Remove photo
+                {t("form.removePhoto")}
               </button>
             )}
             {fieldErrors.photo && (
@@ -3463,12 +3481,12 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
             </div>
           )}
           <div className={clsx("review-card", !photo && "has-error")} id="report-step-review">
-            <strong>{selectedWard ? selectedWardLabel : "Ward not selected"}</strong>
-            <span>{address || "No landmark added yet"}</span>
-            <small className={clsx(!photo && "is-error")}>{photo ? "Photo attached" : "Photo missing - go back and add a clear photo."}</small>
+            <strong>{selectedWard ? selectedWardLabel : t("form.reviewWardMissing")}</strong>
+            <span>{address || t("form.reviewAddressMissing")}</span>
+            <small className={clsx(!photo && "is-error")}>{photo ? t("form.reviewPhotoAttached") : t("form.reviewPhotoMissing")}</small>
           </div>
           <label className="field">
-            <span>How Bad Is It?</span>
+            <span>{t("form.severityQuestion")}</span>
             <div className="option-grid">
               {Object.keys(SEVERITY).map((key) => (
                 <button type="button" className={clsx(severity === key && "is-selected")} onClick={() => setSeverity(key as SeverityKey)} key={key}>
@@ -3480,7 +3498,7 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
             </div>
           </label>
           <label className="field">
-            <span>Waste Type</span>
+            <span>{t("form.categoryLabel")}</span>
             <select value={category} onChange={(event) => setCategory(event.target.value as WasteCategory)}>
               {Object.entries(CATEGORIES).map(([key, value]) => (
                 <option key={key} value={key}>
@@ -3498,21 +3516,21 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
             <LoaderCircle className="spin" size={16} />
             <span>
               <strong>{submitProgressText}</strong>
-              Keep this screen open while we send your photo and report details.
+              {t("form.uploadKeepOpen")}
               {submitStage === "uploading" && (
-                <UploadProgressBar label="Report photo upload progress" value={uploadProgress} />
+                <UploadProgressBar label={t("form.uploadProgressAria")} value={uploadProgress} />
               )}
             </span>
           </div>
         )}
         {slowSubmit && (
-          <p className="warning-text" role="alert">This is taking longer than usual. Your photo may be on a slow connection, so please keep the form open.</p>
+          <p className="warning-text" role="alert">{t("form.slowWarning")}</p>
         )}
         {formOffline && <p className="warning-text" role="alert">{t("form.offlineWarning")}</p>}
         {formError && <p className="warning-text" role="alert">{formError}</p>}
         <div className="form-footer-meta">
           <p className="anonymous form-trust-badge">
-            <ShieldCheck size={13} /> All reports are anonymous
+            <ShieldCheck size={13} /> {t("detail.anonymous")}
           </p>
           <p className="quota-note">{t("quota.left", { count: limit.remaining, total: limit.total })}</p>
         </div>
@@ -3520,12 +3538,12 @@ function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: 
           {formStep > 1 && (
             <button className="secondary-cta" type="button" onClick={goToPreviousStep} disabled={submitting}>
               <ChevronLeft size={16} />
-              Back
+              {t("form.back")}
             </button>
           )}
           {formStep < 3 ? (
             <button className="primary-cta" type="button" onClick={goToNextStep}>
-              Next
+              {t("form.next")}
             </button>
           ) : (
             <button className={clsx("primary-cta", formOffline && "is-offline")} onClick={() => void submit()} disabled={submitting || submitSuccess || formOffline}>
@@ -3608,11 +3626,8 @@ function ProfileSheet({
 
   const previewCall = (label: string, value: string) => {
     setExternalPreview({
-      action: { kind: "tel", value },
-      confirmLabel: "Call now",
-      details: value,
-      helper: `This will start a phone call to ${label}.`,
-      title: `Call ${label}`
+      action: { kind: "tel", value, label },
+      details: value
     });
   };
 
@@ -3653,28 +3668,28 @@ function ProfileSheet({
   if (isWard && !ward) {
     return (
       <DialogSurface
-        ariaLabel="Ward not found"
+        ariaLabel={t("profile.wardMissingTitle")}
         className="profile-sheet"
         onClose={onClose}
       >
         <button className="sheet-back-button" type="button" onClick={onClose}>
           <ChevronLeft size={16} />
-          Back to map
+          {t("action.back")}
         </button>
-        <button className="close-button" onClick={onClose} aria-label="Close profile">
+        <button className="close-button" onClick={onClose} aria-label={t("aria.closeProfile")}>
           <X size={18} />
         </button>
         <div className="profile-hero">
           <Layers size={28} />
           <div>
-            <p className="eyebrow">Ward Profile</p>
-            <h2>Ward {selection.id}</h2>
-            <p>No data available</p>
+            <p className="eyebrow">{t("profile.wardEyebrow")}</p>
+            <h2>{t("ward.label", { ward: selection.id })}</h2>
+            <p>{t("profile.noData")}</p>
           </div>
         </div>
         <div className="accountability-card">
-          <h3>Ward not found</h3>
-          <p>This ward couldn't be found in our data. It may have been renumbered or the link may be outdated.</p>
+          <h3>{t("profile.wardMissingTitle")}</h3>
+          <p>{t("profile.wardMissing")}</p>
         </div>
       </DialogSurface>
     );
@@ -3683,28 +3698,28 @@ function ProfileSheet({
   if (!isWard && !rep) {
     return (
       <DialogSurface
-        ariaLabel="Representative not found"
+        ariaLabel={t("profile.repMissingTitle")}
         className="profile-sheet"
         onClose={onClose}
       >
         <button className="sheet-back-button" type="button" onClick={onClose}>
           <ChevronLeft size={16} />
-          Back to map
+          {t("action.back")}
         </button>
-        <button className="close-button" onClick={onClose} aria-label="Close profile">
+        <button className="close-button" onClick={onClose} aria-label={t("aria.closeProfile")}>
           <X size={18} />
         </button>
         <div className="profile-hero">
           <ShieldCheck size={28} />
           <div>
-            <p className="eyebrow">{selection.type.toUpperCase()} Profile</p>
+            <p className="eyebrow">{t("profile.repProfile", { role: selection.type.toUpperCase() })}</p>
             <h2>{selection.id}</h2>
-            <p>No data available</p>
+            <p>{t("profile.noData")}</p>
           </div>
         </div>
         <div className="accountability-card">
-          <h3>Representative not found</h3>
-          <p>This representative couldn't be found in our data. The link may be outdated or the constituency may have changed.</p>
+          <h3>{t("profile.repMissingTitle")}</h3>
+          <p>{t("profile.repMissing")}</p>
         </div>
       </DialogSurface>
     );
@@ -3712,48 +3727,52 @@ function ProfileSheet({
 
   return (
     <DialogSurface
-      ariaLabel={isWard ? "Ward profile" : "Representative profile"}
+      ariaLabel={
+        isWard
+          ? t("profile.sheetWard", { ward: selection.id })
+          : t("profile.sheetRep", { name: rep?.name ?? selection.id })
+      }
       className="profile-sheet"
       disableEscape={Boolean(externalPreview)}
       onClose={onClose}
     >
         <button className="sheet-back-button" type="button" onClick={onBackToReport ?? onClose}>
           <ChevronLeft size={16} />
-          {returnReport ? "Back to report" : "Back to map"}
+          {returnReport ? t("route.backReport") : t("action.back")}
         </button>
-        <button className="close-button" onClick={onClose} aria-label="Close profile">
+        <button className="close-button" onClick={onClose} aria-label={t("aria.closeProfile")}>
           <X size={18} />
         </button>
         <p className="sheet-breadcrumb">
-          {returnReport ? `Report · Ward ${returnReport.ward_number}` : getRouteSelectionLabel(selection)}
+          {returnReport ? t("route.crumbReportWard", { ward: returnReport.ward_number }) : getRouteTargetLabel(selection, data)}
         </p>
         <div className="profile-hero">
           {rep ? <Avatar rep={rep} /> : <Layers size={28} />}
           <div>
-            <p className="eyebrow">{isWard ? "Ward Profile" : selection.type.toUpperCase()}</p>
-            <h2>{ward ? `Ward ${ward.ward_number}` : rep?.name}</h2>
+            <p className="eyebrow">{isWard ? t("profile.wardEyebrow") : t("profile.repProfile", { role: selection.type.toUpperCase() })}</p>
+            <h2>{ward ? t("ward.label", { ward: ward.ward_number }) : rep?.name}</h2>
             <p>{ward ? wardName || "Bhubaneswar" : `${rep?.party} · ${rep?.constituency}`}</p>
           </div>
         </div>
         <div className="metric-grid">
-          <Metric label="Unresolved" value={activeReports.length} />
-          <Metric label="Total Reports" value={profileReports.length} />
-          <Metric label="Avg Days" value={averageActiveDays} />
+          <Metric label={t("profile.metricUnresolved")} value={activeReports.length} />
+          <Metric label={t("profile.metricTotal")} value={profileReports.length} />
+          <Metric label={t("profile.metricAvg")} value={averageActiveDays} />
         </div>
         {isWard && ward ? (
           <div className="elected-reps-section">
-            <p className="eyebrow elected-reps-eyebrow">Elected Representatives for this Ward</p>
+            <p className="eyebrow elected-reps-eyebrow">{t("profile.repsForWard")}</p>
             <div className="elected-reps-grid">
               <div className="elected-rep-card">
                 <Avatar rep={wardMla ?? undefined} />
-                <strong>{wardMla?.name ?? "Not mapped"}</strong>
+                <strong>{wardMla?.name ?? t("profile.notMapped")}</strong>
                 <span className="elected-rep-role" style={{ color: getPartyTextColor(wardMla?.party) }}>
                   {wardMla ? `${wardMla.party} · MLA` : `${ward.assembly_constituency} · MLA`}
                 </span>
               </div>
               <div className="elected-rep-card">
                 <Avatar rep={wardMp ?? undefined} />
-                <strong>{wardMp?.name ?? "Not mapped"}</strong>
+                <strong>{wardMp?.name ?? t("profile.notMapped")}</strong>
                 <span className="elected-rep-role" style={{ color: getPartyTextColor(wardMp?.party) }}>
                   {wardMp ? `${wardMp.party} · MP` : `${ward.parliamentary_constituency} · MP`}
                 </span>
@@ -3762,60 +3781,63 @@ function ProfileSheet({
           </div>
         ) : (
           <div className="accountability-card">
-            <h3>{selection.type === "mla" ? "Assembly Constituencies" : "Wards"}</h3>
-            <p>Tap to view reports and top locations across this constituency.</p>
+            <h3>{selection.type === "mla" ? t("profile.assemblyAreas") : t("profile.wardsHeading")}</h3>
+            <p>{t("profile.constituencyHelp")}</p>
           </div>
         )}
         {isWard && ward && (
-          <button className="share-ward-button" type="button" aria-label={`Share data for Ward ${ward.ward_number}`} onClick={() => void shareWardData()}>
+          <button className="share-ward-button" type="button" aria-label={t("aria.shareWardData", { ward: ward.ward_number })} onClick={() => void shareWardData()}>
             <Share2 size={14} />
-            Share ward data
+            {t("profile.shareWard")}
           </button>
         )}
         {isWard && ward && shareNote === "copied" && (
-          <p className="already-voted-note" role="status">Copied to clipboard.</p>
+          <p className="already-voted-note" role="status">{t("action.copied")}</p>
         )}
         {isWard && ward && shareNote === "error" && (
-          <p className="warning-text" role="alert">Sharing failed. Check your connection and try again.</p>
+          <p className="warning-text" role="alert">{t("detail.shareFailed")}</p>
         )}
         {contactRep && (contactRep.phone || contactRep.email || contactRep.twitter_handle || contactRep.profile_url) && (
           <div className="rep-contact-card">
-            <h3>{isWard ? "Representative contact" : "Contact"}</h3>
+            <h3>{isWard ? t("profile.contactTitle") : t("profile.contactGeneric")}</h3>
             {contactRep.phone && (
               <button className="rep-contact-row" type="button" onClick={() => previewCall(contactRep.name, contactRep.phone ?? "")}>
                 <Phone size={14} />
+                <span className="sr-only">{t("profile.phone")}</span>
                 <span>{contactRep.phone}</span>
               </button>
             )}
             {contactRep.email && (
               <a className="rep-contact-row" href={`mailto:${contactRep.email}`}>
                 <MessageCircle size={14} />
+                <span className="sr-only">{t("profile.email")}</span>
                 <span>{contactRep.email}</span>
               </a>
             )}
             {contactRep.twitter_handle && (
               <a className="rep-contact-row" href={`https://x.com/${contactRep.twitter_handle.replace(/^@/, "")}`} target="_blank" rel="noreferrer">
                 <ExternalLink size={14} />
+                <span className="sr-only">{t("profile.twitter")}</span>
                 <span>@{contactRep.twitter_handle.replace(/^@/, "")}</span>
               </a>
             )}
             {contactRep.profile_url && (
               <a className="rep-contact-row" href={contactRep.profile_url} target="_blank" rel="noreferrer">
                 <ArrowUpRight size={14} />
-                <span>Official profile</span>
+                <span>{t("profile.website")}</span>
               </a>
             )}
           </div>
         )}
-        <h3>Top Locations</h3>
+        <h3>{t("profile.topLocations")}</h3>
         <ReportList
           reports={profileReports}
           resetKey={`${selection.type}:${selection.id}`}
           wards={data.wards}
           representatives={data.representatives}
           initialLimit={12}
-          emptyTitle="No reports linked here yet."
-          emptyDescription="When citizens report spots in this area, they will appear here."
+          emptyTitle={t("profile.emptyTitle")}
+          emptyDescription={t("profile.emptyDescription")}
           onSelect={onSelectReport}
         />
       {externalPreview && (
@@ -3834,40 +3856,34 @@ function AboutSheet({ onClose, onOpenChangelog }: { onClose: () => void; onOpenC
   const wardEnd = BMC_CONTACTS.ward_numbers[BMC_CONTACTS.ward_numbers.length - 1];
 
   return (
-    <DialogSurface layerClassName="modal-layer top" ariaLabel="About Amma Odisha" className="top-sheet" onClose={onClose}>
-        <button className="close-button" onClick={onClose} aria-label="Close about">
+    <DialogSurface layerClassName="modal-layer top" ariaLabel={t("about.title")} className="top-sheet" onClose={onClose}>
+        <button className="close-button" onClick={onClose} aria-label={t("aria.closeAbout")}>
           <X size={18} />
         </button>
-        <img className="about-hero-image" src="/garbage-about.jpg" alt="Illegal garbage dumping in Bhubaneswar" />
-        <h2>Why Amma Odisha?</h2>
+        <img className="about-hero-image" src="/garbage-about.jpg" alt={t("about.heroAlt")} />
+        <h2>{t("about.headline")}</h2>
         <p className="eyebrow">AMMA ODISHA</p>
-        <p>
-          Bhubaneswar generates over <strong>1,200 tonnes</strong> of waste daily. Despite BMC's efforts, illegal dumping persists across the city — on sidewalks,
-          vacant plots, and road corners. Citizens complain, but complaints disappear into bureaucratic black holes.
-        </p>
-        <p>
-          <strong>Amma Odisha changes the equation.</strong> Every garbage dump is mapped, photographed, and linked to the responsible ward, MLA, and MP. When
-          enough citizens report the same spot, it becomes impossible to ignore. The data is public, the accountability is permanent.
-        </p>
-        <p>This is crowdsourced civic infrastructure — built by citizens, for citizens.</p>
+        <p>{t("about.intro")}</p>
+        <p>{t("about.mission")}</p>
+        <p>{t("about.how")}</p>
         <div className="accountability-card">
           <h3>{BMC_CONTACTS.name} ({BMC_CONTACTS.short_name})</h3>
           <p>
-            Main Contact: <a href={`tel:${BMC_CONTACTS.main_contact_number}`}>{BMC_CONTACTS.main_contact_number}</a> · Helpline: <a href={`tel:${BMC_CONTACTS.helpline_number}`}>{BMC_CONTACTS.helpline_number}</a>
+            {t("about.mainContact")} <a href={`tel:${BMC_CONTACTS.main_contact_number}`}>{BMC_CONTACTS.main_contact_number}</a> · {t("about.helplineLabel")} <a href={`tel:${BMC_CONTACTS.helpline_number}`}>{BMC_CONTACTS.helpline_number}</a>
           </p>
           <p>
-            Email: <a href={`mailto:${BMC_CONTACTS.email}`}>{BMC_CONTACTS.email}</a> · Grievance: <a href={`mailto:${BMC_CONTACTS.grievance_email}`}>{BMC_CONTACTS.grievance_email}</a>
+            {t("about.emailLabel")} <a href={`mailto:${BMC_CONTACTS.email}`}>{BMC_CONTACTS.email}</a> · {t("about.grievance")} <a href={`mailto:${BMC_CONTACTS.grievance_email}`}>{BMC_CONTACTS.grievance_email}</a>
           </p>
-          <p>North Zone: {BMC_CONTACTS.zone_contacts.north_zone} · South-West Zone: {BMC_CONTACTS.zone_contacts.south_west_zone} · South-East Zone: {BMC_CONTACTS.zone_contacts.south_east_zone}</p>
+          <p>{t("about.zoneNorth")} {BMC_CONTACTS.zone_contacts.north_zone} · {t("about.zoneSouthWest")} {BMC_CONTACTS.zone_contacts.south_west_zone} · {t("about.zoneSouthEast")} {BMC_CONTACTS.zone_contacts.south_east_zone}</p>
           <p>{BMC_CONTACTS.address}</p>
-          <p>Coverage: {BMC_CONTACTS.total_wards} wards (Ward {wardStart} to Ward {wardEnd}).</p>
+          <p>{t("about.coverage", { total: BMC_CONTACTS.total_wards, start: wardStart, end: wardEnd })}</p>
         </div>
         <div className="social-row">
-          <a href="https://x.com/MrinallSamal" target="_blank" rel="noreferrer" aria-label="Follow Amma Odisha on X (Twitter)">
-            Follow updates <ExternalLink size={13} />
+          <a href="https://x.com/MrinallSamal" target="_blank" rel="noreferrer" aria-label={t("about.followXAria")}>
+            {t("about.followUpdates")} <ExternalLink size={13} />
           </a>
           <a href="https://x.com/realmojojojo_" target="_blank" rel="noreferrer">
-            Built by Mrinall Samal
+            {t("about.builtBy")}
           </a>
           <a href="https://ammaodisha.me" target="_blank" rel="noreferrer">
             ammaodisha.me
@@ -3876,7 +3892,7 @@ function AboutSheet({ onClose, onOpenChangelog }: { onClose: () => void; onOpenC
             className="secondary-cta compact"
             onClick={onOpenChangelog}
           >
-            View Changelog
+            {t("changelog.viewButton")}
           </button>
         </div>
     </DialogSurface>
@@ -3885,14 +3901,14 @@ function AboutSheet({ onClose, onOpenChangelog }: { onClose: () => void; onOpenC
 
 function ChangelogSheet({ onClose }: { onClose: () => void }) {
   return (
-    <DialogSurface ariaLabel="Changelog" className="profile-sheet small" onClose={onClose}>
-        <button className="close-button" onClick={onClose} aria-label="Close changelog">
+    <DialogSurface ariaLabel={t("changelog.title")} className="profile-sheet small" onClose={onClose}>
+        <button className="close-button" onClick={onClose} aria-label={t("aria.closeChangelog")}>
           <X size={18} />
         </button>
         <div className="sheet-title-row compact changelog-header">
-          <h2>Changelog</h2>
+          <h2>{t("changelog.title")}</h2>
         </div>
-        <p className="muted">What's new in Amma Odisha</p>
+        <p className="muted">{t("changelog.subtitle")}</p>
         {CHANGELOG.map((entry) => (
           <div className="changelog-entry" key={entry.version}>
             <div className="sheet-title-row compact">
@@ -3942,22 +3958,22 @@ function MobileQRModal({ onClose, url }: { onClose: () => void; url: string }) {
   };
 
   return (
-    <DialogSurface ariaLabel="Report on mobile" className="mini-card mobile-qr-modal" onClose={onClose}>
-      <button className="close-button" onClick={onClose} aria-label="Close mobile QR code">
+    <DialogSurface ariaLabel={t("qr.dialogLabel")} className="mini-card mobile-qr-modal" onClose={onClose}>
+      <button className="close-button" onClick={onClose} aria-label={t("qr.close")}>
         <X size={18} />
       </button>
-      <h2>Report on your phone</h2>
-      <p className="mobile-qr-desc">Scan this code to open Amma Odisha with the report form ready for your camera.</p>
+      <h2>{t("qr.title")}</h2>
+      <p className="mobile-qr-desc">{t("qr.body")}</p>
       <div className="mobile-qr-frame">
         {qrFailed ? (
           <p className="mobile-qr-fallback">
-            QR image unavailable.<br />
-            Copy the link below instead.
+            {t("qr.fallback")}<br />
+            {t("qr.fallbackCopy")}
           </p>
         ) : (
           <img
             src={qrUrl}
-            alt="QR code to open the report form on mobile"
+            alt={t("qr.title")}
             width={220}
             height={220}
             loading="lazy"
@@ -3968,10 +3984,10 @@ function MobileQRModal({ onClose, url }: { onClose: () => void; url: string }) {
       <p className="mobile-qr-url">{url}</p>
       <button className="secondary-cta" type="button" onClick={() => void handleShareOrCopy()}>
         <Share2 size={15} />
-        {copyState === "copied" ? "Link copied" : "Copy link"}
+        {copyState === "copied" ? t("qr.copied") : t("action.copyLink")}
       </button>
       {copyState === "error" && (
-        <p className="warning-text" role="alert">Could not copy the link. Long-press the URL above to copy it manually.</p>
+        <p className="warning-text" role="alert">{t("qr.copyError")}</p>
       )}
     </DialogSurface>
   );
@@ -3996,17 +4012,17 @@ function TelegramToast({ trigger }: { trigger: boolean }) {
           writeStorageValue("nk_telegram_hidden", "1");
           setHidden(true);
         }}
-        aria-label="Dismiss Telegram community toast"
+        aria-label={t("aria.dismissTelegram")}
       >
         <X size={12} />
       </button>
       <MessageCircle size={16} />
       <span>
-        <strong>Join the community</strong>
-        Feedback, ideas & updates on Telegram
+        <strong>{t("telegram.text")}</strong>
+        {t("telegram.textSub")}
       </span>
-      <a href="https://t.me/+23jgBr4Gz6BkYTFl" target="_blank" rel="noreferrer" aria-label="Join the Amma Odisha Telegram community">
-        Join
+      <a href="https://t.me/+23jgBr4Gz6BkYTFl" target="_blank" rel="noreferrer" aria-label={t("aria.joinTelegram")}>
+        {t("telegram.join")}
       </a>
     </div>
   );
