@@ -202,6 +202,7 @@ export function AdminPanel() {
   };
 
   const login = async (key = adminKey) => {
+    if (loading) return;
     setLoading(true);
     setLoginError("");
     try {
@@ -241,7 +242,7 @@ export function AdminPanel() {
 
   const approveReport = useCallback(
     async (report: GarbageReport) => {
-      if (busyId) return;
+      if (busyId || bulkBusy) return;
       setBusyId(report.id);
       setActionError("");
       try {
@@ -256,11 +257,11 @@ export function AdminPanel() {
         setBusyId(null);
       }
     },
-    [busyId, list.length, activeTab, adminKey, adjustStats, refreshStatsSilently]
+    [busyId, bulkBusy, list.length, activeTab, adminKey, adjustStats, refreshStatsSilently]
   );
 
   const confirmReject = async (report: GarbageReport, reason: string) => {
-    if (busyId) return;
+    if (busyId || bulkBusy) return;
     setBusyId(report.id);
     setActionError("");
     const index = list.findIndex((item) => item.id === report.id);
@@ -524,7 +525,7 @@ export function AdminPanel() {
                 index={index}
                 currentTab={activeTab}
                 focused={index === focusIndex}
-                busy={busyId === report.id}
+                busy={busyId === report.id || bulkBusy}
                 rejectOpen={rejectPopoverId === report.id}
                 onApprove={() => void approveReport(report)}
                 onOpenReject={() => setRejectPopoverId(report.id)}
@@ -726,12 +727,6 @@ function ModerationCard({
       </button>
       {expanded && (
         <div className="moderation-details">
-          {metadata.claude_check && (
-            <p>
-              <strong>Claude:</strong> {metadata.claude_check.is_civic_issue ? "Civic issue" : "Not civic issue"} (
-              {Math.round((metadata.claude_check.confidence ?? 0) * 100)}%) — {metadata.claude_check.reason}
-            </p>
-          )}
           {metadata.text_check?.flags?.length ? (
             <p>
               <strong>Text:</strong> {metadata.text_check.severity} — {metadata.text_check.flags.join(", ")}

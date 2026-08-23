@@ -8,12 +8,16 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc -b --force",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
     "check:supabase": "node scripts/check-supabase.mjs",
     "seed:pull": "node scripts/import-seed.mjs",
     "seed:supabase": "node scripts/seed-supabase.mjs"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.74.0",

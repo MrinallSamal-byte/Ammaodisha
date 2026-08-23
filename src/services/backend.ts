@@ -1224,7 +1224,8 @@ class SupabaseBackend extends LocalBackend {
       p_photo_url: input.photoUrl ?? null,
       p_photo_thumb_url: input.photoThumbUrl ?? null,
       p_lat: input.lat,
-      p_lng: input.lng
+      p_lng: input.lng,
+      p_name: input.name ?? null
     });
     if (error) throw error;
 

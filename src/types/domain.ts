@@ -42,11 +42,6 @@ export interface ModerationMetadata {
     passed?: boolean;
     severity?: string;
   };
-  claude_check?: {
-    reason?: string;
-    confidence?: number;
-    is_civic_issue?: boolean;
-  };
   duplicate_check?: {
     is_duplicate?: boolean;
     duplicate_of?: string;

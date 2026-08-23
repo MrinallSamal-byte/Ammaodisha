@@ -83,8 +83,13 @@ async function copyText(text: string) {
 
 export async function shareOrCopy(data: ShareData, fallbackUrl: string) {
   if (navigator.share) {
-    await navigator.share(data);
-    return "shared";
+    try {
+      await navigator.share(data);
+      return "shared";
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return "cancelled";
+      throw error;
+    }
   }
   await copyText(data.url ?? fallbackUrl);
   return "copied";

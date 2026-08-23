@@ -109,6 +109,7 @@ const en: Dictionary = {
   "dupes.metersAway": "{count} m away",
   "dupes.viewReport": "View this report",
 
+  "escalation.level0": "New",
   "escalation.level1": "Active",
   "escalation.level2": "Aging",
   "escalation.level3": "Stale",
@@ -609,6 +610,7 @@ const or: Dictionary = {
   "dupes.metersAway": "{count} ମିଟର ଦୂରରେ",
   "dupes.viewReport": "ଏହି ରିପୋର୍ଟ ଦେଖନ୍ତୁ",
 
+  "escalation.level0": "ନୂତନ",
   "escalation.level1": "ସକ୍ରିୟ",
   "escalation.level2": "ପୁରୁଣା",
   "escalation.level3": "ଅବହେଳିତ",

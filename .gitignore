@@ -1,14 +1,25 @@
+# Dependencies
 node_modules
+
+# Build output
 dist
 coverage
 playwright-report
 test-results
 *.tsbuildinfo
+
+# Environment & secrets
 .env
 .env.local
-.agents/
-skills-lock.json
-.vercel
 .env*.local
 
-tmp-*.log
+# Dev server / tooling logs
+*.log
+tmp/
+
+# Local editor/tool state (machine-specific)
+.vscode/*
+!.vscode/settings.json
+
+# Vercel
+.vercel

@@ -26,13 +26,25 @@ function createFingerprint() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+let memoryFingerprint: string | null = null;
+
 export function getFingerprint() {
-  let value = localStorage.getItem(FINGERPRINT_KEY);
-  if (!value) {
-    value = createFingerprint();
-    localStorage.setItem(FINGERPRINT_KEY, value);
+  if (memoryFingerprint) return memoryFingerprint;
+  try {
+    const value = localStorage.getItem(FINGERPRINT_KEY);
+    if (value) {
+      memoryFingerprint = value;
+      return value;
+    }
+    const created = createFingerprint();
+    localStorage.setItem(FINGERPRINT_KEY, created);
+    memoryFingerprint = created;
+    return created;
+  } catch {
+    // Storage unavailable (private mode/quota): fall back to a session-only id.
+    memoryFingerprint = createFingerprint();
+    return memoryFingerprint;
   }
-  return value;
 }
 
 export function canSubmitReport(now = Date.now()) {
