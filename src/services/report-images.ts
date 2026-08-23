@@ -8,4 +8,4 @@ export const ODISHA_GARBAGE_FALLBACK_IMAGE = {
   height: 545
 } as const;
 
-export const LOCAL_REPORT_PHOTO_FALLBACK_URL = "/garbage-about.png";
+export const LOCAL_REPORT_PHOTO_FALLBACK_URL = "/garbage-about.jpg";

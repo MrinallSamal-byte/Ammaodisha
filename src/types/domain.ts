@@ -163,6 +163,17 @@ export interface AdminStats {
   approved: number;
 }
 
+export type RealtimeConnectionStatus = "live" | "reconnecting" | "offline";
+
+export interface AdminQueuePage {
+  reports: GarbageReport[];
+  hasMore: boolean;
+}
+
+export interface ModerateReportOptions {
+  rejectionReason?: string;
+}
+
 export interface Backend {
   fetchCivicData(): Promise<CivicData>;
   fetchReports(): Promise<GarbageReport[]>;
@@ -174,11 +185,11 @@ export interface Backend {
   upvoteReport(reportId: string): Promise<{ alreadyVoted: boolean; newCount?: number }>;
   uploadReportPhoto(file: File, options?: UploadReportPhotoOptions): Promise<UploadReportPhotoResult>;
   adminStats(adminKey: string): Promise<AdminStats>;
-  adminQueue(adminKey: string, status: ModerationStatus): Promise<GarbageReport[]>;
-  moderateReport(adminKey: string, reportId: string, decision: ModerationStatus): Promise<void>;
+  adminQueue(adminKey: string, offset?: number): Promise<AdminQueuePage>;
+  moderateReport(adminKey: string, reportId: string, status: ModerationStatus, options?: ModerateReportOptions): Promise<void>;
   bulkModerate(adminKey: string, reportIds: string[], decision: ModerationStatus): Promise<void>;
   swapDuplicate(adminKey: string, reportId: string, existingId: string): Promise<void>;
   rejectBoth(adminKey: string, reportId: string, existingId: string): Promise<void>;
-  subscribeToChanges(callback: () => void): () => void;
-  subscribeToAdminChanges(callback: () => void): () => void;
+  subscribeToChanges(callback: () => void, onStatus?: (status: RealtimeConnectionStatus) => void): () => void;
+  subscribeToAdminChanges(callback: () => void, onStatus?: (status: RealtimeConnectionStatus) => void): () => void;
 }

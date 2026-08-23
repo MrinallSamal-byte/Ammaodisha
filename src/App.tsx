@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { PublicApp } from "./components/PublicApp";
 import { backend } from "./services/backend";
-import type { CivicData } from "./types/domain";
+import type { CivicData, RealtimeConnectionStatus } from "./types/domain";
 
 interface RouteHistoryState {
   returnProfile?: { id: string; type: "ward" | "mla" | "mp" } | null;
@@ -32,6 +32,8 @@ export default function App() {
   const [error, setError] = useState("");
   const [path, setPath] = useState(() => window.location.pathname);
   const [routeState, setRouteState] = useState<RouteHistoryState>(() => (window.history.state ?? {}) as RouteHistoryState);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const [connStatus, setConnStatus] = useState<RealtimeConnectionStatus>("live");
   const isAdmin = path === "/admin";
 
   // Skip the civic-data fetch entirely when on the admin route — the admin panel
@@ -43,7 +45,11 @@ export default function App() {
 
     backend
       .fetchCivicData()
-      .then(setData)
+      .then((nextData) => {
+        if (cancelled) return;
+        setData(nextData);
+        setLastRefreshedAt(new Date().toISOString());
+      })
       .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load civic data."));
 
     // Subscribe to DB changes so admin approve/reject decisions and cleanup
@@ -53,10 +59,12 @@ export default function App() {
       backend
         .fetchReports()
         .then((nextReports) => {
-          if (!cancelled) setData((prev) => (prev ? { ...prev, reports: nextReports } : prev));
+          if (cancelled) return;
+          setData((prev) => (prev ? { ...prev, reports: nextReports } : prev));
+          setLastRefreshedAt(new Date().toISOString());
         })
         .catch(() => { /* silent — stale data is better than a crash */ });
-    });
+    }, setConnStatus);
 
     return () => {
       cancelled = true;
@@ -127,7 +135,10 @@ export default function App() {
   return (
     <PublicApp
       autoOpenReport={autoOpenReport}
+      connectionStatus={connStatus}
       data={data}
+      lastRefreshedAt={lastRefreshedAt}
+      onSuccessfulRefresh={() => setLastRefreshedAt(new Date().toISOString())}
       routeSelection={routeSelection}
       routeState={routeState}
       onDataChange={setData}

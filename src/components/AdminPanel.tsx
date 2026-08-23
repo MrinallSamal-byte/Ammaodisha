@@ -1,11 +1,13 @@
 import clsx from "clsx";
 import {
   ArrowUp,
+  ChevronDown,
   CheckCircle2,
   CircleCheck,
   CircleX,
   Eye,
   EyeOff,
+  Camera,
   ExternalLink,
   LoaderCircle,
   LogOut,
@@ -63,6 +65,36 @@ const reasonLabels: Record<string, string> = {
   pending_review: "pending review"
 };
 
+const REJECT_PRESETS = ["Spam", "Duplicate", "Unverifiable photo", "Wrong location", "Other"];
+
+type StatsDelta = Partial<Record<"total" | ModerationStatus, number>>;
+type UndoEntry = { report: GarbageReport; index: number; tab: ModerationStatus };
+
+function parseQueuePayload(payload: { reports: GarbageReport[]; hasMore: boolean }): {
+  reports: GarbageReport[];
+  hasMore: boolean;
+} {
+  return { reports: payload.reports ?? [], hasMore: Boolean(payload.hasMore) };
+}
+
+function composeReason(preset: string, note: string) {
+  const trimmed = note.trim();
+  return trimmed ? `${preset}: ${trimmed}` : preset;
+}
+
+function formatDuration(fromIso: string, toIso: string) {
+  const start = new Date(fromIso).getTime();
+  const end = new Date(toIso).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "";
+  const minutes = Math.floor((end - start) / 60_000);
+  if (minutes < 1) return "under a minute";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
+}
+
 const MIN_TAB_SWIPE_PX = 72;
 const HORIZONTAL_SWIPE_RATIO = 1.5;
 
@@ -72,24 +104,70 @@ export function AdminPanel() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [stats, setStats] = useState<AdminStats | null>(null);
-  const [queues, setQueues] = useState<Record<ModerationStatus, GarbageReport[]>>({ flagged: [], rejected: [], approved: [] });
+  const [list, setList] = useState<GarbageReport[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [offset, setOffset] = useState(0);
   const [activeTab, setActiveTab] = useState<ModerationStatus>("flagged");
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [photo, setPhoto] = useState<string | null>(null);
   const [showTop, setShowTop] = useState(false);
+  const [focusIndex, setFocusIndex] = useState(-1);
+  const [rejectPopoverId, setRejectPopoverId] = useState<string | null>(null);
+  const [undoEntry, setUndoEntry] = useState<UndoEntry | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const activeTabRef = useRef<ModerationStatus>(activeTab);
+
+  const fetchQueuePage = useCallback(async (key: string, pageOffset: number) => {
+    const payload = await backend.adminQueue(key, pageOffset);
+    return parseQueuePayload(payload);
+  }, []);
+
+  const adjustStats = useCallback((delta: StatsDelta) => {
+    setStats((current) => {
+      if (!current) return current;
+      const next = { ...current };
+      (Object.keys(delta) as ("total" | ModerationStatus)[]).forEach((key) => {
+        next[key] = Math.max(0, (next[key] ?? 0) + (delta[key] ?? 0));
+      });
+      return next;
+    });
+  }, []);
+
+  const refreshStatsSilently = useCallback((key: string) => {
+    backend.adminStats(key).then((nextStats) => setStats(nextStats)).catch(() => undefined);
+  }, []);
 
   const loadQueue = useCallback(
     async (status: ModerationStatus, key = adminKey, options: { silent?: boolean } = {}) => {
       if (!options.silent) {
         setLoading(true);
         setActionError("");
+        setList([]);
+        setHasMore(false);
+        setOffset(0);
+        setFocusIndex(-1);
+        setRejectPopoverId(null);
       }
       try {
-        const [nextQueue, nextStats] = await Promise.all([backend.adminQueue(key, status), backend.adminStats(key)]);
-        setQueues((current) => ({ ...current, [status]: nextQueue }));
+        const [page, nextStats] = await Promise.all([fetchQueuePage(key, 0), backend.adminStats(key)]);
+        if (activeTabRef.current === status) {
+          if (options.silent) {
+            // Realtime/poll refresh only reconciles page 0; deeper pages stay loaded.
+            setList((current) => {
+              const freshIds = new Set(page.reports.map((report) => report.id));
+              return [...page.reports, ...current.filter((report) => !freshIds.has(report.id))];
+            });
+          } else {
+            setList(page.reports);
+            setHasMore(page.hasMore);
+            setOffset(page.reports.length);
+          }
+        }
         setStats(nextStats);
       } catch (caught) {
         if (options.silent) {
@@ -101,8 +179,27 @@ export function AdminPanel() {
         if (!options.silent) setLoading(false);
       }
     },
-    [adminKey]
+    [adminKey, fetchQueuePage]
   );
+
+  const loadMore = async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    setActionError("");
+    try {
+      const page = await fetchQueuePage(adminKey, offset);
+      setList((current) => {
+        const knownIds = new Set(current.map((report) => report.id));
+        return [...current, ...page.reports.filter((report) => !knownIds.has(report.id))];
+      });
+      setHasMore(page.hasMore);
+      setOffset((current) => current + page.reports.length);
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "Failed to load more reports.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const login = async (key = adminKey) => {
     setLoading(true);
@@ -115,6 +212,7 @@ export function AdminPanel() {
       setIsLoggedIn(true);
       await loadQueue(activeTab, key);
     } catch {
+      removeSessionValue(SESSION_KEY);
       setLoginError("That admin key did not work. Check the key and try again.");
     } finally {
       setLoading(false);
@@ -141,31 +239,87 @@ export function AdminPanel() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const action = async (reportId: string, decision: ModerationStatus) => {
+  const approveReport = useCallback(
+    async (report: GarbageReport) => {
+      if (busyId) return;
+      setBusyId(report.id);
+      setActionError("");
+      try {
+        await backend.moderateReport(adminKey, report.id, "approved");
+        setList((current) => current.filter((item) => item.id !== report.id));
+        setFocusIndex((current) => (current >= list.length - 1 ? list.length - 2 : current));
+        adjustStats(activeTab === "rejected" ? { rejected: -1, approved: 1 } : { flagged: -1, approved: 1 });
+        refreshStatsSilently(adminKey);
+      } catch (caught) {
+        setActionError(caught instanceof Error ? caught.message : "Action failed. Please try again.");
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [busyId, list.length, activeTab, adminKey, adjustStats, refreshStatsSilently]
+  );
+
+  const confirmReject = async (report: GarbageReport, reason: string) => {
+    if (busyId) return;
+    setBusyId(report.id);
     setActionError("");
+    const index = list.findIndex((item) => item.id === report.id);
     try {
-      await backend.moderateReport(adminKey, reportId, decision);
-      setQueues((current) => ({ ...current, [activeTab]: current[activeTab].filter((report) => report.id !== reportId) }));
-      setStats(await backend.adminStats(adminKey));
+      await backend.moderateReport(adminKey, report.id, "rejected", reason ? { rejectionReason: reason } : undefined);
+      setRejectPopoverId(null);
+      setUndoEntry({ report, index: index < 0 ? 0 : index, tab: activeTab });
+      setList((current) => current.filter((item) => item.id !== report.id));
+      setFocusIndex((current) => (current >= list.length - 1 ? list.length - 2 : current));
+      adjustStats(activeTab === "approved" ? { approved: -1, rejected: 1 } : { flagged: -1, rejected: 1 });
+      refreshStatsSilently(adminKey);
     } catch (caught) {
       setActionError(caught instanceof Error ? caught.message : "Action failed. Please try again.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const undoReject = async () => {
+    const entry = undoEntry;
+    if (!entry) return;
+    setUndoEntry(null);
+    setActionError("");
+    if (entry.tab === activeTab) {
+      setList((current) => {
+        const next = [...current];
+        next.splice(Math.min(entry.index, next.length), 0, entry.report);
+        return next;
+      });
+    }
+    adjustStats(entry.tab === "approved" ? { rejected: -1, approved: 1 } : { rejected: -1, flagged: 1 });
+    try {
+      await backend.moderateReport(adminKey, entry.report.id, "approved");
+      refreshStatsSilently(adminKey);
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "Undo failed. Please try again.");
     }
   };
 
   const approveAll = async () => {
-    const ids = queues[activeTab].map((report) => report.id);
+    const ids = list.map((report) => report.id);
     if (!ids.length) return;
+    if (!window.confirm(`Approve all ${ids.length} flagged reports?`)) return;
+    setBulkBusy(true);
     setActionError("");
     try {
       await backend.bulkModerate(adminKey, ids, "approved");
-      setQueues((current) => ({ ...current, [activeTab]: [] }));
-      setStats(await backend.adminStats(adminKey));
+      setList([]);
+      setFocusIndex(-1);
+      adjustStats({ flagged: -ids.length, approved: ids.length });
+      refreshStatsSilently(adminKey);
     } catch (caught) {
       setActionError(caught instanceof Error ? caught.message : "Bulk approve failed. Please try again.");
+    } finally {
+      setBulkBusy(false);
     }
   };
 
-  const queue = queues[activeTab];
+  const queue = list;
   const tabCounts = useMemo(() => tabs.map((tab) => ({ ...tab, count: stats?.[tab.key] ?? 0 })), [stats]);
 
   const onTouchEnd = (clientX: number, clientY: number) => {
@@ -181,6 +335,7 @@ export function AdminPanel() {
   };
 
   useEffect(() => {
+    activeTabRef.current = activeTab;
     if (isLoggedIn) void loadQueue(activeTab);
   }, [activeTab, isLoggedIn, loadQueue]);
 
@@ -192,7 +347,7 @@ export function AdminPanel() {
       if (document.hidden) return;
       if (refreshTimer != null) window.clearTimeout(refreshTimer);
       refreshTimer = window.setTimeout(() => {
-        void loadQueue(activeTab, adminKey, { silent: true });
+        void loadQueue(activeTabRef.current, adminKey, { silent: true });
       }, 700);
     };
     const refreshWhenVisible = () => {
@@ -209,7 +364,38 @@ export function AdminPanel() {
       document.removeEventListener("visibilitychange", refreshWhenVisible);
       unsubscribe();
     };
-  }, [activeTab, adminKey, isLoggedIn, loadQueue]);
+  }, [adminKey, isLoggedIn, loadQueue]);
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const tag = event.target instanceof HTMLElement ? event.target.tagName.toUpperCase() : "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (event.key === "Escape") {
+        if (rejectPopoverId) setRejectPopoverId(null);
+        else setPhoto(null);
+        return;
+      }
+      if (rejectPopoverId || photo) return;
+      if (event.key === "j" || event.key === "k") {
+        setFocusIndex((current) => {
+          const max = queue.length - 1;
+          if (max < 0) return -1;
+          if (current < 0) return event.key === "j" ? 0 : max;
+          return Math.max(0, Math.min(max, current + (event.key === "j" ? 1 : -1)));
+        });
+        return;
+      }
+      if (event.key !== "a" && event.key !== "r") return;
+      const report = queue[focusIndex];
+      if (!report) return;
+      if (event.key === "a") void approveReport(report);
+      else setRejectPopoverId(report.id);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isLoggedIn, queue, focusIndex, rejectPopoverId, photo, approveReport]);
 
   if (!isLoggedIn) {
     return (
@@ -262,6 +448,7 @@ export function AdminPanel() {
         <button
           onClick={() => {
             removeSessionValue(SESSION_KEY);
+            setAdminKey("");
             setIsLoggedIn(false);
           }}
           aria-label="Logout"
@@ -297,6 +484,20 @@ export function AdminPanel() {
             </button>
           ))}
         </nav>
+        <div className="kbd-hints">
+          <span><kbd>j/k</kbd> move</span>
+          <span><kbd>a</kbd> approve</span>
+          <span><kbd>r</kbd> reject</span>
+          <span><kbd>Esc</kbd> close</span>
+        </div>
+        {undoEntry && (
+          <div className="reject-undo-row">
+            <span>Report rejected</span>
+            <button className="undo-button" type="button" onClick={() => void undoReject()}>
+              Undo
+            </button>
+          </div>
+        )}
         {actionError && (
           <p className="warning-text" style={{ margin: "8px 16px", padding: "10px 12px", borderRadius: 8, background: "var(--primary-soft)" }}>
             {actionError}
@@ -304,8 +505,8 @@ export function AdminPanel() {
         )}
         <section className="admin-cards">
           {activeTab === "flagged" && queue.length > 3 && (
-            <button className="bulk-action" onClick={() => void approveAll()}>
-              <CircleCheck size={14} />
+            <button className="bulk-action" onClick={() => void approveAll()} disabled={bulkBusy || busyId != null}>
+              {bulkBusy ? <LoaderCircle className="spin" size={14} /> : <CircleCheck size={14} />}
               Approve All {queue.length} Flagged
             </button>
           )}
@@ -322,8 +523,14 @@ export function AdminPanel() {
                 report={report}
                 index={index}
                 currentTab={activeTab}
+                focused={index === focusIndex}
+                busy={busyId === report.id}
+                rejectOpen={rejectPopoverId === report.id}
+                onApprove={() => void approveReport(report)}
+                onOpenReject={() => setRejectPopoverId(report.id)}
+                onCloseReject={() => setRejectPopoverId(null)}
+                onConfirmReject={(reason) => void confirmReject(report, reason)}
                 onViewPhoto={setPhoto}
-                onAction={(decision) => void action(report.id, decision)}
               />
             ))
           ) : (
@@ -331,6 +538,12 @@ export function AdminPanel() {
               <CheckCircle2 size={34} />
               <p>No {activeTab} reports. Queue is clear!</p>
             </div>
+          )}
+          {!loading && hasMore && (
+            <button className="bulk-action" onClick={() => void loadMore()} disabled={loadingMore}>
+              {loadingMore ? <LoaderCircle className="spin" size={14} /> : <ChevronDown size={14} />}
+              Load more
+            </button>
           )}
         </section>
       </div>
@@ -379,80 +592,72 @@ function ModerationCard({
   report,
   index,
   currentTab,
-  onAction,
+  focused,
+  busy,
+  rejectOpen,
+  onApprove,
+  onOpenReject,
+  onCloseReject,
+  onConfirmReject,
   onViewPhoto
 }: {
   report: GarbageReport;
   index: number;
   currentTab: ModerationStatus;
-  onAction: (decision: ModerationStatus) => void;
+  focused: boolean;
+  busy: boolean;
+  rejectOpen: boolean;
+  onApprove: () => void;
+  onOpenReject: () => void;
+  onCloseReject: () => void;
+  onConfirmReject: (reason: string) => void;
   onViewPhoto: (url: string) => void;
 }) {
+  const cardRef = useRef<HTMLElement | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [photoRevealed, setPhotoRevealed] = useState(false);
+  const [preset, setPreset] = useState(REJECT_PRESETS[0]);
+  const [note, setNote] = useState("");
   const [useFallbackPhoto, setUseFallbackPhoto] = useState(() => !report.photo_url);
   const [fallbackPhotoFailed, setFallbackPhotoFailed] = useState(false);
-  const [undoVisible, setUndoVisible] = useState(false);
-  const undoTimerRef = useRef<number | null>(null);
+  const [thumbFailed, setThumbFailed] = useState(false);
   const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
   const metadata = report.moderation_metadata ?? {};
   const reason = metadata.flag_reason || metadata.rejection_reason || "";
   const isCleanupPending = metadata.cleanup_pending === true;
   const duplicate = reason === "potential_duplicate" && report._duplicate_original;
   const isNsfwPhoto = reason === "safesearch_failed";
+  const fullPhotoUrl = useFallbackPhoto
+    ? ODISHA_GARBAGE_FALLBACK_IMAGE.photo_url
+    : report.photo_url ?? ODISHA_GARBAGE_FALLBACK_IMAGE.photo_url;
   const photoUrl = fallbackPhotoFailed
     ? LOCAL_REPORT_PHOTO_FALLBACK_URL
-    : useFallbackPhoto
-      ? ODISHA_GARBAGE_FALLBACK_IMAGE.photo_url
-      : report.photo_url ?? ODISHA_GARBAGE_FALLBACK_IMAGE.photo_url;
+    : !thumbFailed && report.photo_thumb_url
+      ? report.photo_thumb_url
+      : fullPhotoUrl;
   const isFallbackPhoto = useFallbackPhoto || fallbackPhotoFailed || !report.photo_url;
   const shouldCoverPhoto = isNsfwPhoto && !photoRevealed && !isFallbackPhoto;
+  const originalProofUrl = report.photo_thumb_url || report.photo_url || ODISHA_GARBAGE_FALLBACK_IMAGE.photo_url;
+  const proofUrl = report.resolved_photo_thumb_url || report.resolved_photo_url || ODISHA_GARBAGE_FALLBACK_IMAGE.photo_url;
+  const mapLat = typeof report.gps_latitude === "number" ? report.gps_latitude : Number(report.latitude);
+  const mapLng = typeof report.gps_longitude === "number" ? report.gps_longitude : Number(report.longitude);
+  const gpsAccuracy = typeof report.gps_accuracy_meters === "number" ? report.gps_accuracy_meters : null;
+  const locationSource = report.location_source ?? "";
+  const moderatedAt = typeof metadata.moderated_at === "string" ? metadata.moderated_at : "";
+  const moderatedAge = moderatedAt ? formatDuration(report.created_at, moderatedAt) : "";
 
   useEffect(() => {
-    return () => {
-      if (undoTimerRef.current != null) window.clearTimeout(undoTimerRef.current);
-    };
-  }, []);
-
-  useEffect(() => {
+    setThumbFailed(false);
     setUseFallbackPhoto(!report.photo_url);
     setFallbackPhotoFailed(false);
-  }, [report.photo_url]);
+  }, [report.photo_url, report.photo_thumb_url]);
 
-  const run = async (decision: ModerationStatus) => {
-    if (decision === "rejected") {
-      setUndoVisible(true);
-      undoTimerRef.current = window.setTimeout(async () => {
-        setUndoVisible(false);
-        setBusy(true);
-        try {
-          await onAction(decision);
-        } finally {
-          setBusy(false);
-        }
-      }, 4000);
-      return;
-    }
-    setBusy(true);
-    try {
-      await onAction(decision);
-    } finally {
-      // Reset busy even if the parent handler rejects (error shown at panel level).
-      setBusy(false);
-    }
-  };
-
-  const undoReject = () => {
-    if (undoTimerRef.current != null) {
-      window.clearTimeout(undoTimerRef.current);
-      undoTimerRef.current = null;
-    }
-    setUndoVisible(false);
-  };
+  useEffect(() => {
+    if (focused) cardRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [focused]);
 
   return (
-    <article className="moderation-card" style={{ animationDelay: `${index * 40}ms` }}>
+    <article ref={cardRef} className={clsx("moderation-card", focused && "is-focused")} style={{ animationDelay: `${index * 40}ms` }}>
       <div className="moderation-main">
         <button
           className={clsx("moderation-photo", shouldCoverPhoto && "is-covered")}
@@ -470,6 +675,10 @@ function ModerationCard({
             alt=""
             referrerPolicy="no-referrer"
             onError={() => {
+              if (!thumbFailed && report.photo_thumb_url) {
+                setThumbFailed(true);
+                return;
+              }
               if (useFallbackPhoto) {
                 setFallbackPhotoFailed(true);
                 return;
@@ -482,17 +691,33 @@ function ModerationCard({
         <div>
           <h2>{report.address}</h2>
           <p>
-            Ward #{report.ward_number} · {timeAgo(report.created_at)} · {report.upvote_count || 1} upvotes
+            Ward #{report.ward_number} · {timeAgo(report.created_at)} · {report.upvote_count ?? 0} upvotes
           </p>
           <em style={{ background: `${severity.color}15`, color: severity.color }}>{severity.label}</em>
           {reason && <b>{reasonLabels[reason] ?? reason.replace(/_/g, " ")}</b>}
         </div>
       </div>
       {isCleanupPending && (
-        <p className="cleanup-pending-box">
-          🧹 Cleanup proof submitted — citizen claims this spot has been cleaned.
-          Approve to mark as resolved and remove from map. Reject to keep active.
-        </p>
+        <>
+          <p className="cleanup-pending-box">
+            <Camera size={13} /> Cleanup proof submitted — citizen claims this spot has been cleaned.
+            Approve to mark as resolved and remove from map. Reject to keep active.
+          </p>
+          <div className="compare-grid">
+            <figure>
+              <button type="button" onClick={() => onViewPhoto(originalProofUrl)} aria-label="View original photo">
+                <img src={originalProofUrl} alt="" referrerPolicy="no-referrer" loading="lazy" />
+              </button>
+              <figcaption>Original</figcaption>
+            </figure>
+            <figure>
+              <button type="button" onClick={() => onViewPhoto(proofUrl)} aria-label="View cleanup proof photo">
+                <img src={proofUrl} alt="" referrerPolicy="no-referrer" loading="lazy" />
+              </button>
+              <figcaption>Cleanup proof</figcaption>
+            </figure>
+          </div>
+        </>
       )}
       {duplicate && <p className="duplicate-box">Possible Duplicate — Compare with existing report before approving.</p>}
       <button className="details-toggle" onClick={() => setExpanded(!expanded)}>
@@ -518,26 +743,68 @@ function ModerationCard({
               {metadata.vision_safesearch.racy}
             </p>
           )}
+          <p>
+            <strong>Location:</strong> {mapLat.toFixed(5)}, {mapLng.toFixed(5)}
+            {gpsAccuracy != null ? ` ±${Math.round(gpsAccuracy)}m` : ""}
+            {locationSource ? ` (${locationSource})` : ""}{" "}
+            <a href={`https://www.google.com/maps?q=${mapLat.toFixed(5)},${mapLng.toFixed(5)}`} target="_blank" rel="noreferrer">
+              Open in Google Maps
+            </a>{" "}
+            {locationSource === "ward_center" && <b className="conn-badge">ward center</b>}
+          </p>
+          {report.reporter_name && (
+            <p>
+              <strong>Reporter:</strong> {report.reporter_name}
+            </p>
+          )}
+          {report.notes && (
+            <p>
+              <strong>Notes:</strong> {report.notes}
+            </p>
+          )}
+          {moderatedAge && (
+            <p>
+              <strong>Moderated:</strong> {moderatedAge} after submission
+            </p>
+          )}
         </div>
       )}
       <div className="moderation-actions">
-        {undoVisible ? (
-          <div className="reject-undo-row">
-            <span>Rejected</span>
-            <button className="undo-button" type="button" onClick={undoReject}>
-              Undo
-            </button>
+        {rejectOpen ? (
+          <div className="reject-popover">
+            <select aria-label="Rejection reason" value={preset} onChange={(event) => setPreset(event.target.value)}>
+              {REJECT_PRESETS.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+            <textarea
+              aria-label="Rejection note"
+              placeholder="Optional note"
+              rows={2}
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" onClick={() => onConfirmReject(composeReason(preset, note))}>
+                Confirm reject
+              </button>
+              <button type="button" className="undo-button" onClick={onCloseReject}>
+                Cancel
+              </button>
+            </div>
           </div>
         ) : (
           <>
             {currentTab !== "approved" && (
-              <button onClick={() => void run("approved")} disabled={busy}>
+              <button onClick={onApprove} disabled={busy}>
                 {busy ? <LoaderCircle className="spin" size={13} /> : <CircleCheck size={13} />}
                 {currentTab === "rejected" ? "Restore" : "Approve"}
               </button>
             )}
             {currentTab !== "rejected" && (
-              <button onClick={() => void run("rejected")} disabled={busy} className="reject">
+              <button onClick={onOpenReject} disabled={busy} className="reject">
                 {busy ? <LoaderCircle className="spin" size={13} /> : <CircleX size={13} />}
                 Reject
               </button>

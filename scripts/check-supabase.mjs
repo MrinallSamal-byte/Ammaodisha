@@ -58,10 +58,13 @@ if (supabaseAnonKey) {
     assert(Boolean(error), "raw coordinate/GPS columns were readable with the public key");
   });
 
-  await check("Storage bucket garbage-photos listing endpoint is reachable", async () => {
+  await check("Storage bucket garbage-photos listing is blocked for anon", async () => {
     const { data, error } = await supabase.storage.from("garbage-photos").list("reports", { limit: 1 });
-    if (error) throw error;
-    return `${data?.length ?? 0} objects returned`;
+    assert(
+      Boolean(error) || !(data?.length),
+      "anon key could list storage objects; hardened schema should deny storage SELECT"
+    );
+    return error ? `listing rejected (${error.message})` : "listing returned no objects";
   });
 
   await check("Storage bucket garbage-photos public URL endpoint is reachable", async () => {
@@ -262,10 +265,26 @@ async function checkReportWorkflow(anonSupabase, serviceSupabase) {
 
     return "probe inserted, admin realtime received, hidden pending, approved live, public realtime received, upvote counted, rejected hidden";
   } finally {
-    if (realtimeProbe) await realtimeProbe.cleanup();
-    if (adminRealtimeProbe) await adminRealtimeProbe.cleanup();
-    await serviceSupabase.from("garbage_reports").delete().eq("id", reportId);
-    await serviceSupabase.from("public_report_change_events").delete().eq("report_id", reportId);
+    try {
+      if (realtimeProbe) await realtimeProbe.cleanup();
+    } catch (cleanupError) {
+      console.warn(`Probe channel cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : cleanupError}`);
+    }
+    try {
+      if (adminRealtimeProbe) await adminRealtimeProbe.cleanup();
+    } catch (cleanupError) {
+      console.warn(`Admin probe channel cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : cleanupError}`);
+    }
+    try {
+      await serviceSupabase.from("garbage_reports").delete().eq("id", reportId);
+    } catch (cleanupError) {
+      console.warn(`Probe report delete failed: ${cleanupError instanceof Error ? cleanupError.message : cleanupError}`);
+    }
+    try {
+      await serviceSupabase.from("public_report_change_events").delete().eq("report_id", reportId);
+    } catch (cleanupError) {
+      console.warn(`Probe event delete failed: ${cleanupError instanceof Error ? cleanupError.message : cleanupError}`);
+    }
   }
 }
 

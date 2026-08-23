@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { pinEnglish } from "../helpers/lang";
 
 async function expectReportSheetOpen(page: Page) {
   await expect.poll(async () => {
@@ -28,7 +29,7 @@ test("public map shell loads", async ({ page }) => {
     .isVisible()
     .catch(() => false);
   const desktopQrCtaVisible = await page
-    .getByRole("button", { name: /Scan QR to report on mobile/i })
+    .getByRole("button", { name: /Scan QR to report/i })
     .isVisible()
     .catch(() => false);
   expect(reportCtaVisible || desktopQrCtaVisible).toBe(true);
@@ -63,6 +64,7 @@ test("map-first controls filter reports directly", async ({ page }) => {
 });
 
 test("resolved-only map results guide users to list view", async ({ page }) => {
+  await pinEnglish(page);
   await page.goto("/");
   await page.getByRole("button", { name: /Start using map/i }).click().catch(() => undefined);
   await page.getByLabel("Filter by status").selectOption("resolved");
@@ -73,6 +75,7 @@ test("resolved-only map results guide users to list view", async ({ page }) => {
 });
 
 test("insights priority queue opens urgent reports", async ({ page }) => {
+  await pinEnglish(page);
   await page.goto("/");
   await page.getByRole("button", { name: /Start using map/i }).click().catch(() => undefined);
   await page.getByRole("button", { name: /Open Amma Odisha insights/i }).click();
@@ -137,6 +140,7 @@ test("report form requests location only after user action", async ({ page }) =>
 });
 
 test("filtered list empty state can clear filters", async ({ page }) => {
+  await pinEnglish(page);
   await page.goto("/");
   await page.getByRole("button", { name: /Start using map/i }).click().catch(() => undefined);
   await page.getByRole("button", { name: /Open search and filters/i }).click();
@@ -152,6 +156,7 @@ test("filtered list empty state can clear filters", async ({ page }) => {
 
 test("report form validates fields and confirms submission", async ({ page }) => {
   test.setTimeout(60_000);
+  await pinEnglish(page);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
@@ -178,8 +183,9 @@ test("report form validates fields and confirms submission", async ({ page }) =>
   await page.getByRole("button", { name: /^Next$/i }).click();
   await expect(page.getByText(/Step 3 of 3/i)).toBeVisible();
   await page.getByRole("button", { name: /Submit Report/i }).click();
-  await expect(page.getByRole("status").getByText(/Report submitted/i)).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole("status")).toContainText(/We review every photo/i, { timeout: 20_000 });
+  const successScreen = page.locator(".submit-success-screen");
+  await expect(successScreen.getByText(/Report submitted/i)).toBeVisible({ timeout: 20_000 });
+  await expect(successScreen).toContainText(/We review every photo/i, { timeout: 20_000 });
 });
 
 test("deep links open contextual public sheets", async ({ page }) => {

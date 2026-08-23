@@ -1,16 +1,19 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { IS_STAGING, LOCAL_REPORTS_KEY, OUTSIDE_CITY_LOCALITY_PATTERNS } from "./constants";
+import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
+import { IS_STAGING, LOCAL_REPORTS_KEY, MAX_REPORTS_PER_DAY, OUTSIDE_CITY_LOCALITY_PATTERNS } from "./constants";
 import { findNearestWard, findWardInGeoJson, isInsideBoundary, pointInRing } from "./geo";
 import { canSubmitReport, getFingerprint, hasUpvoted, markUpvoted, recordSubmission } from "./limits";
 import { ODISHA_GARBAGE_FALLBACK_IMAGE } from "./report-images";
 import type {
+  AdminQueuePage,
   AdminStats,
   Backend,
   CityBoundaryFeatureCollection,
   CivicData,
   GarbageReport,
   ModerationStatus,
+  ModerateReportOptions,
   NewReportInput,
+  RealtimeConnectionStatus,
   Representative,
   ResolveReportInput,
   SeverityKey,
@@ -30,6 +33,31 @@ const localAdminKey = import.meta.env.DEV ? (import.meta.env.VITE_LOCAL_ADMIN_KE
 const PUBLIC_REPORTS_VIEW = "public_garbage_reports";
 const PUBLIC_REPORT_EVENTS_TABLE = "public_report_change_events";
 const ADMIN_QUEUE_EVENTS_TABLE = "admin_queue_change_events";
+const ADMIN_REQUEST_TIMEOUT_MS = 20000;
+const ADMIN_QUEUE_PAGE_SIZE = 50;
+const PUBLIC_REPORT_COLUMNS = [
+  "id",
+  "latitude",
+  "longitude",
+  "location_source",
+  "ward_number",
+  "address",
+  "severity",
+  "category",
+  "status",
+  "photo_url",
+  "photo_thumb_url",
+  "upvote_count",
+  "resolved_at",
+  "resolved_photo_url",
+  "resolved_photo_thumb_url",
+  "resolved_lat",
+  "resolved_lng",
+  "created_at",
+  "updated_at",
+  "is_test",
+  "moderation_status"
+].join(",");
 
 if (import.meta.env.DEV && !localAdminKey) {
   console.warn(
@@ -105,15 +133,29 @@ function isMissingSchemaColumn(error: unknown, column: string) {
   return code === "PGRST204" && message.includes(`'${column}'`);
 }
 
+async function adminResponseMessage(response: Response) {
+  try {
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("json")) return "Service temporarily unavailable";
+    const payload = (await response.json()) as { message?: unknown; error?: unknown } | null;
+    if (!payload || typeof payload !== "object") return "Service temporarily unavailable";
+    const detail = payload.message ?? payload.error;
+    if (typeof detail !== "string" || !detail.trim()) return "Service temporarily unavailable";
+    return detail.trim();
+  } catch {
+    return "Service temporarily unavailable";
+  }
+}
+
 async function fetchJson<T>(url: string, timeoutMs = 30_000): Promise<T> {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, { signal: controller.signal });
     if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
     return response.json() as Promise<T>;
   } finally {
-    window.clearTimeout(timer);
+    globalThis.clearTimeout(timer);
   }
 }
 
@@ -340,7 +382,11 @@ function fetchReportImageReplacements() {
         const deduped = [...new Map(normalized.map((source) => [source.photo_url, source])).values()];
         return deduped.length ? deduped : INDIA_GARBAGE_IMAGE_POOL;
       })
-      .catch(() => INDIA_GARBAGE_IMAGE_POOL);
+      .catch(() => {
+        // Reset so the next call retries instead of caching the fallback forever.
+        reportImageReplacementCache = null;
+        return INDIA_GARBAGE_IMAGE_POOL;
+      });
   }
   return reportImageReplacementCache;
 }
@@ -364,32 +410,6 @@ function addReportImageAttribution(report: GarbageReport, image: ReportImageRepl
   };
 }
 
-function pickUnusedReportImage(replacements: ReportImageReplacement[], usedPhotoUrls: Set<string>, seed: string) {
-  if (!replacements.length || usedPhotoUrls.size >= replacements.length) return null;
-
-  const startIndex = hashString(seed) % replacements.length;
-  for (let offset = 0; offset < replacements.length; offset += 1) {
-    const image = replacements[(startIndex + offset) % replacements.length];
-    if (!usedPhotoUrls.has(image.photo_url)) return image;
-  }
-
-  return null;
-}
-
-function pickReportImage(replacements: ReportImageReplacement[], usedPhotoUrls: Set<string>, seed: string) {
-  if (!replacements.length) return null;
-
-  const unusedImage = pickUnusedReportImage(replacements, usedPhotoUrls, seed);
-  if (unusedImage) {
-    usedPhotoUrls.add(unusedImage.photo_url);
-    return unusedImage;
-  }
-
-  // Once we exhaust the pool, still spread assignments deterministically
-  // instead of collapsing every remaining report to one fallback image.
-  return replacements[hashString(seed) % replacements.length];
-}
-
 function applyReportImageReplacements(reports: GarbageReport[], replacements: ReportImageReplacement[]) {
   const uniqueReplacements = [
     ...new Map([...replacements, ODISHA_GARBAGE_FALLBACK_IMAGE].map((image) => [image.photo_url, image])).values()
@@ -397,32 +417,46 @@ function applyReportImageReplacements(reports: GarbageReport[], replacements: Re
   if (!uniqueReplacements.length) return reports;
 
   const replacementsByUrl = new Map(uniqueReplacements.map((image) => [image.photo_url, image]));
-  const usedPhotoUrls = new Set<string>();
+  // Track every source already shown (genuine claims and assigned replacements)
+  // so each distinct report ends up with a different image.
+  const claimedPhotoUrls = new Set<string>();
+  const assignedSourceUrls = new Set<string>();
+
+  const pickAssignment = (seed: string) => {
+    const startIndex = hashString(seed) % uniqueReplacements.length;
+    for (let offset = 0; offset < uniqueReplacements.length; offset += 1) {
+      const candidate = uniqueReplacements[(startIndex + offset) % uniqueReplacements.length];
+      if (!claimedPhotoUrls.has(candidate.photo_url) && !assignedSourceUrls.has(candidate.photo_url)) {
+        assignedSourceUrls.add(candidate.photo_url);
+        return candidate;
+      }
+    }
+
+    // Once we exhaust the pool, rotate deterministically by assignment ordinal
+    // instead of collapsing every remaining report to one fallback image.
+    const rotated = uniqueReplacements[assignedSourceUrls.size % uniqueReplacements.length];
+    assignedSourceUrls.add(rotated.photo_url);
+    return rotated;
+  };
 
   return reports.map((report, index) => {
     const currentPhotoUrl = report.photo_url ?? "";
 
-    // If the report already has a photo URL
-    if (currentPhotoUrl) {
-      // Check if this exact URL was already used by a previous report
-      if (!usedPhotoUrls.has(currentPhotoUrl)) {
-        usedPhotoUrls.add(currentPhotoUrl);
-        const existingReplacement = replacementsByUrl.get(currentPhotoUrl);
-        if (existingReplacement) {
-          return addReportImageAttribution(report, existingReplacement);
-        }
-        // Not in replacement pool but has a URL — keep as-is (user-uploaded or external)
-        if (!isLegacyReportPhoto(report)) {
-          return report;
-        }
+    // If the report already has a photo URL nobody else is showing yet
+    if (currentPhotoUrl && !claimedPhotoUrls.has(currentPhotoUrl) && !assignedSourceUrls.has(currentPhotoUrl)) {
+      claimedPhotoUrls.add(currentPhotoUrl);
+      const existingReplacement = replacementsByUrl.get(currentPhotoUrl);
+      if (existingReplacement) {
+        return addReportImageAttribution(report, existingReplacement);
       }
-      // URL is a duplicate — fall through to get a unique replacement
+      // Not in replacement pool but has a URL — keep as-is (user-uploaded or external)
+      if (!isLegacyReportPhoto(report)) {
+        return report;
+      }
     }
 
-    // Assign a unique replacement image for reports with no photo, legacy photos, or duplicates
-    const image = pickReportImage(uniqueReplacements, usedPhotoUrls, `${report.id}:${index}:reassign`);
-    if (!image) return addReportImageAttribution(report, ODISHA_GARBAGE_FALLBACK_IMAGE);
-    return addReportImageAttribution(report, image);
+    // Assign a distinct replacement image for reports with no photo, legacy photos, or duplicate URLs
+    return addReportImageAttribution(report, pickAssignment(`${report.id}:${index}:reassign`));
   });
 }
 
@@ -523,7 +557,7 @@ function normalizeToBhubaneswar(
   };
 }
 
-function normalizeReportsForBhubaneswar(
+export function normalizeReportsForBhubaneswar(
   reports: GarbageReport[],
   wards: Ward[],
   boundaries: WardFeatureCollection,
@@ -550,11 +584,17 @@ function mergeLocalReports(seed: GarbageReport[]) {
   return Array.from(byId.values()).sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
 }
 
+let warnedLocalSaveFailure = false;
+
 function saveLocalReports(reports: GarbageReport[]) {
   try {
     localStorage.setItem(LOCAL_REPORTS_KEY, JSON.stringify(reports));
-  } catch {
-    // localStorage may be unavailable (quota exceeded, private browsing); fail silently.
+  } catch (error) {
+    // localStorage may be unavailable (quota exceeded, private browsing).
+    if (!warnedLocalSaveFailure) {
+      warnedLocalSaveFailure = true;
+      console.warn("[Amma Odisha] Could not persist local reports:", error);
+    }
   }
 }
 
@@ -653,6 +693,9 @@ async function compressImage(
       canvas.height = height;
       const ctx = canvas.getContext("2d");
       if (!ctx) { resolve(file); return; }
+      // Flatten PNG transparency onto white so it doesn't turn black as JPEG.
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, width, height);
       ctx.drawImage(image, 0, 0, width, height);
       canvas.toBlob(
         (blob) => {
@@ -693,7 +736,7 @@ function uploadStorageObjectWithProgress({
     request.open("POST", url);
     request.setRequestHeader("Authorization", `Bearer ${supabaseAnonKey}`);
     request.setRequestHeader("apikey", supabaseAnonKey!);
-    request.setRequestHeader("Cache-Control", "31536000");
+    request.setRequestHeader("Cache-Control", "public, max-age=31536000, immutable");
     request.setRequestHeader("Content-Type", contentType);
     request.setRequestHeader("x-upsert", "false");
 
@@ -800,7 +843,7 @@ class LocalBackend implements Backend {
 
   async submitReport(input: NewReportInput) {
     const limit = canSubmitReport();
-    if (!limit.allowed) throw new Error("Daily limit of 5 reports reached. Try again tomorrow.");
+    if (!limit.allowed) throw new Error(`Daily limit of ${MAX_REPORTS_PER_DAY} reports reached. Try again tomorrow.`);
 
     const report: GarbageReport = {
       ...input,
@@ -879,20 +922,29 @@ class LocalBackend implements Backend {
     };
   }
 
-  async adminQueue(adminKey: string, status: ModerationStatus) {
+  async adminQueue(adminKey: string, offset = 0): Promise<AdminQueuePage> {
     this.assertAdmin(adminKey);
-    return (await this.loadCivicData()).reports.filter((r) => r.moderation_status === status);
+    const queueSource = (await this.loadCivicData())
+      .reports
+      .filter((report) => report.moderation_status !== "approved")
+      .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+    const reports = queueSource.slice(offset, offset + ADMIN_QUEUE_PAGE_SIZE);
+    return { reports, hasMore: reports.length === ADMIN_QUEUE_PAGE_SIZE };
   }
 
-  async moderateReport(adminKey: string, reportId: string, decision: ModerationStatus) {
+  async moderateReport(adminKey: string, reportId: string, status: ModerationStatus, options?: ModerateReportOptions) {
     this.assertAdmin(adminKey);
     const report = (await this.loadCivicData()).reports.find((item) => item.id === reportId);
     if (!report) throw new Error("Report not found");
     upsertLocalReports([
       {
         ...report,
-        moderation_status: decision,
-        moderation_metadata: { ...(report.moderation_metadata ?? {}), moderated_at: new Date().toISOString() }
+        moderation_status: status,
+        moderation_metadata: {
+          ...(report.moderation_metadata ?? {}),
+          ...(options?.rejectionReason ? { rejection_reason: options.rejectionReason } : {}),
+          moderated_at: new Date().toISOString()
+        }
       }
     ]);
     this.data = undefined;
@@ -930,13 +982,15 @@ class LocalBackend implements Backend {
     await this.bulkModerate(adminKey, [reportId, existingId], "rejected");
   }
 
-  subscribeToChanges(callback: () => void): () => void {
+  subscribeToChanges(callback: () => void, onStatus?: (status: RealtimeConnectionStatus) => void): () => void {
     void callback;
+    onStatus?.("live");
     return () => {};
   }
 
-  subscribeToAdminChanges(callback: () => void): () => void {
+  subscribeToAdminChanges(callback: () => void, onStatus?: (status: RealtimeConnectionStatus) => void): () => void {
     void callback;
+    onStatus?.("live");
     return () => {};
   }
 
@@ -946,6 +1000,8 @@ class LocalBackend implements Backend {
 }
 
 // ─── SupabaseBackend ──────────────────────────────────────────────────────────
+
+const EMPTY_CITY_BOUNDARY: CityBoundaryFeatureCollection = { type: "FeatureCollection", features: [] };
 
 class SupabaseBackend extends LocalBackend {
   private client: SupabaseClient;
@@ -1016,7 +1072,7 @@ class SupabaseBackend extends LocalBackend {
   }
 
   override async fetchCivicData(): Promise<CivicData> {
-    const [wards, representatives, reports, wardBoundaries, cityBoundary, politicalMapping] = await Promise.all([
+    const [wards, representatives, reports, wardBoundaries, cityBoundaryResult, politicalMapping] = await Promise.all([
       this.client
         .from("wards")
         .select("ward_number, ward_name, zone, assembly_constituency, parliamentary_constituency, center_lat, center_lng, locality_name")
@@ -1024,7 +1080,7 @@ class SupabaseBackend extends LocalBackend {
       this.client.from("representatives").select("*").eq("active", true),
       this.fetchReports(),
       this.fetchWardBoundaries(),
-      fetchJson<CityBoundaryFeatureCollection>("/bmc-boundary.json"),
+      fetchJson<CityBoundaryFeatureCollection>("/bmc-boundary.json").catch(() => null),
       fetchJson<PoliticalMappingData>("/bbsr-political-mapping.json").catch(() => null)
     ]);
     if (wards.error) throw wards.error;
@@ -1034,9 +1090,10 @@ class SupabaseBackend extends LocalBackend {
 
     return {
       wards: safeWards,
-      cityBoundary,
+      cityBoundary: cityBoundaryResult ?? EMPTY_CITY_BOUNDARY,
       representatives: safeRepresentatives,
-      reports: normalizeReportsForBhubaneswar(reports, safeWards, wardBoundaries, cityBoundary),
+      // Live Supabase coordinates are authoritative — no relocation pass.
+      reports,
       wardBoundaries
     };
   }
@@ -1044,19 +1101,26 @@ class SupabaseBackend extends LocalBackend {
   override async fetchReports() {
     let query = this.client
       .from(PUBLIC_REPORTS_VIEW)
-      .select("*")
-      .order("created_at", { ascending: false });
+      .select(PUBLIC_REPORT_COLUMNS)
+      .order("created_at", { ascending: false })
+      .limit(500);
     if (!IS_STAGING) query = query.eq("is_test", false);
     const supabaseResult = await query;
-    const supabaseReports = (supabaseResult.data ?? []) as GarbageReport[];
+    const supabaseReports = (supabaseResult.data ?? []) as unknown as GarbageReport[];
     if (supabaseResult.error && !isMissingPublicReportSurface(supabaseResult.error)) {
       console.warn("Supabase report fetch error, using local data:", supabaseResult.error);
     }
 
-    // Only merge upvote counts for Supabase reports (local seed data already has counts)
-    const withCounts = supabaseReports.length
-      ? await this.mergeDerivedUpvoteCounts(supabaseReports)
-      : supabaseReports;
+    // Only merge upvote counts for Supabase reports (local seed data already has counts).
+    // A flaky count read degrades to the persisted upvote_count instead of failing the load.
+    let withCounts = supabaseReports;
+    if (supabaseReports.length) {
+      try {
+        withCounts = await this.mergeDerivedUpvoteCounts(supabaseReports);
+      } catch (countError) {
+        console.warn("Supabase upvote count fetch error, using persisted report counts:", countError);
+      }
+    }
 
     // Use Supabase reports as source of truth if the query succeeded without error.
     // Otherwise, fallback to merging local seed data.
@@ -1080,7 +1144,11 @@ class SupabaseBackend extends LocalBackend {
   }
 
   override async fetchReportById(id: string) {
-    const { data, error } = await this.client.from(PUBLIC_REPORTS_VIEW).select("*").eq("id", id).maybeSingle();
+    const { data, error } = await this.client
+      .from(PUBLIC_REPORTS_VIEW)
+      .select(PUBLIC_REPORT_COLUMNS)
+      .eq("id", id)
+      .maybeSingle();
     if (error) {
       if (isMissingPublicReportSurface(error)) return this.fallback.fetchReportById(id);
       console.warn("Supabase report detail fetch error, using local data:", error);
@@ -1090,13 +1158,13 @@ class SupabaseBackend extends LocalBackend {
       return null;
     }
     try {
-      const [reportWithCount] = await this.mergeDerivedUpvoteCounts([data as GarbageReport]);
+      const [reportWithCount] = await this.mergeDerivedUpvoteCounts([data as unknown as GarbageReport]);
       const replacementImages = await fetchReportImageReplacements();
       return applyReportImageReplacements([normalizeReport(reportWithCount)], replacementImages)[0] ?? null;
     } catch (countError) {
       console.warn("Supabase upvote count fetch error, using persisted report count:", countError);
       const replacementImages = await fetchReportImageReplacements();
-      return applyReportImageReplacements([normalizeReport(data as GarbageReport)], replacementImages)[0] ?? null;
+      return applyReportImageReplacements([normalizeReport(data as unknown as GarbageReport)], replacementImages)[0] ?? null;
     }
   }
 
@@ -1118,7 +1186,7 @@ class SupabaseBackend extends LocalBackend {
 
   override async submitReport(input: NewReportInput) {
     const limit = canSubmitReport();
-    if (!limit.allowed) throw new Error("Daily limit of 5 reports reached. Try again tomorrow.");
+    if (!limit.allowed) throw new Error(`Daily limit of ${MAX_REPORTS_PER_DAY} reports reached. Try again tomorrow.`);
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const payload = { ...input, id, is_test: IS_STAGING };
@@ -1151,7 +1219,7 @@ class SupabaseBackend extends LocalBackend {
   }
 
   override async resolveReport(reportId: string, input: ResolveReportInput): Promise<GarbageReport> {
-    const { error } = await this.client.rpc("submit_cleanup_proof", {
+    const { data, error } = await this.client.rpc("submit_cleanup_proof", {
       p_report_id: reportId,
       p_photo_url: input.photoUrl ?? null,
       p_photo_thumb_url: input.photoThumbUrl ?? null,
@@ -1159,30 +1227,36 @@ class SupabaseBackend extends LocalBackend {
       p_lng: input.lng
     });
     if (error) throw error;
-    // Return a minimal delta — the caller (ResolveModal) will spread this
-    // over the original full report object to keep all original fields intact.
-    return {
-      id: reportId,
-      latitude: input.lat,
-      longitude: input.lng,
-      ward_number: 0,
-      address: "",
-      severity: "medium",
-      category: "mixed",
-      status: "unresolved",
-      upvote_count: 1,
-      created_at: new Date().toISOString(),
-      moderation_status: "flagged",
-      resolved_photo_url: input.photoUrl ?? null,
-      resolved_photo_thumb_url: input.photoThumbUrl ?? null,
-      resolved_lat: input.lat,
-      resolved_lng: input.lng,
-      moderation_metadata: {
+
+    // Return ONLY the fields the RPC actually changed — the caller spreads this
+    // delta over the live report, so placeholder values would corrupt it.
+    const result = (data ?? {}) as Record<string, unknown>;
+    const delta: Record<string, unknown> = { id: reportId };
+    for (const key of [
+      "status",
+      "moderation_status",
+      "resolved_photo_url",
+      "resolved_photo_thumb_url",
+      "resolved_lat",
+      "resolved_lng",
+      "resolved_at",
+      "resolved_by_name",
+      "updated_at",
+      "moderation_metadata"
+    ]) {
+      const value = result[key];
+      if (value !== undefined && value !== null) delta[key] = value;
+    }
+    if (!delta.moderation_metadata) {
+      // The RPC doesn't return metadata; mirror exactly what it writes server-side
+      // so callers see the re-flagged cleanup-pending state without refetching.
+      delta.moderation_metadata = {
         flag_reason: "cleanup_submitted",
         cleanup_pending: true,
         cleanup_submitted_at: new Date().toISOString()
-      }
-    } as GarbageReport;
+      };
+    }
+    return delta as unknown as GarbageReport;
   }
 
   override async upvoteReport(reportId: string) {
@@ -1233,16 +1307,21 @@ class SupabaseBackend extends LocalBackend {
 
     if (thumbnail.size < compressed.size) {
       const thumbnailPath = `reports/thumbs/${id}.${getStorageExtension(thumbnail)}`;
-      await uploadStorageObjectWithProgress({
-        bucket: "garbage-photos",
-        contentType: thumbnail.type || "image/jpeg",
-        file: thumbnail,
-        options,
-        path: thumbnailPath,
-        progressEnd: 99,
-        progressStart: 82
-      });
-      thumbUrl = this.client.storage.from("garbage-photos").getPublicUrl(thumbnailPath).data.publicUrl;
+      try {
+        await uploadStorageObjectWithProgress({
+          bucket: "garbage-photos",
+          contentType: thumbnail.type || "image/jpeg",
+          file: thumbnail,
+          options,
+          path: thumbnailPath,
+          progressEnd: 99,
+          progressStart: 82
+        });
+        thumbUrl = this.client.storage.from("garbage-photos").getPublicUrl(thumbnailPath).data.publicUrl;
+      } catch (thumbnailError) {
+        // Don't orphan the already-uploaded full photo — ship it without a thumb.
+        console.warn("Thumbnail upload failed; keeping full-size photo only:", thumbnailError);
+      }
     }
 
     reportUploadProgress(options, 100);
@@ -1253,14 +1332,30 @@ class SupabaseBackend extends LocalBackend {
     return this.callAdmin<AdminStats>(adminKey, "stats");
   }
 
-  override async adminQueue(adminKey: string, status: ModerationStatus) {
-    const response = await this.callAdmin<{ reports: GarbageReport[] }>(adminKey, `queue&status=${status}`);
-    const replacementImages = await fetchReportImageReplacements();
-    return applyReportImageReplacements(response.reports.map(normalizeReport), replacementImages);
+  override async adminQueue(adminKey: string, offset = 0): Promise<AdminQueuePage> {
+    const response = await this.callAdmin<unknown>(adminKey, "queue", {
+      action: "queue",
+      limit: ADMIN_QUEUE_PAGE_SIZE,
+      offset
+    });
+    const rawReports = Array.isArray(response)
+      ? (response as GarbageReport[])
+      : Array.isArray((response as { reports?: unknown } | null)?.reports)
+        ? ((response as { reports: GarbageReport[] }).reports)
+        : [];
+    const reports = rawReports.map(normalizeReport);
+    return { reports, hasMore: reports.length === ADMIN_QUEUE_PAGE_SIZE };
   }
 
-  override async moderateReport(adminKey: string, reportId: string, decision: ModerationStatus) {
-    await this.callAdmin(adminKey, "moderate", { reportId, decision });
+  override async moderateReport(
+    adminKey: string,
+    reportId: string,
+    status: ModerationStatus,
+    options?: ModerateReportOptions
+  ) {
+    const body: Record<string, unknown> = { reportId, decision: status };
+    if (options?.rejectionReason) body.rejection_reason = options.rejectionReason;
+    await this.callAdmin(adminKey, "moderate", body);
   }
 
   override async bulkModerate(adminKey: string, reportIds: string[], decision: ModerationStatus) {
@@ -1275,55 +1370,125 @@ class SupabaseBackend extends LocalBackend {
     await this.callAdmin(adminKey, "reject_both", { reportId, existingId });
   }
 
-  override subscribeToChanges(callback: () => void): () => void {
-    const channel = this.client
-      .channel("garbage-report-changes")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: PUBLIC_REPORT_EVENTS_TABLE },
-        () => void callback()
-      )
-      .subscribe((status) => {
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.warn("Supabase realtime subscription failed:", status);
-        }
-      });
-    return () => {
-      void this.client.removeChannel(channel);
-    };
+  override subscribeToChanges(callback: () => void, onStatus?: (status: RealtimeConnectionStatus) => void): () => void {
+    return this.subscribeWithReconnect("garbage-report-changes", PUBLIC_REPORT_EVENTS_TABLE, callback, onStatus);
   }
 
-  override subscribeToAdminChanges(callback: () => void): () => void {
-    const channel = this.client
-      .channel("admin-queue-changes")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: ADMIN_QUEUE_EVENTS_TABLE },
-        () => void callback()
-      )
-      .subscribe((status) => {
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.warn("Supabase admin realtime subscription failed:", status);
-        }
-      });
+  override subscribeToAdminChanges(callback: () => void, onStatus?: (status: RealtimeConnectionStatus) => void): () => void {
+    return this.subscribeWithReconnect("admin-queue-changes", ADMIN_QUEUE_EVENTS_TABLE, callback, onStatus);
+  }
+
+  private subscribeWithReconnect(
+    channelName: string,
+    table: string,
+    callback: () => void,
+    onStatus?: (status: RealtimeConnectionStatus) => void
+  ): () => void {
+    let attempt = 0;
+    let connection = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let disposed = false;
+    let channel: RealtimeChannel | null = null;
+
+    const dropChannel = (target: RealtimeChannel) => {
+      channel = null;
+      void this.client.removeChannel(target);
+    };
+
+    const connect = () => {
+      if (disposed) return;
+      connection += 1;
+      channel = this.client
+        .channel(`${channelName}:${connection}`)
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table },
+          () => void callback()
+        )
+        .subscribe((status) => {
+          if (disposed) return;
+          if (status === "SUBSCRIBED") {
+            attempt = 0;
+            onStatus?.("live");
+            return;
+          }
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            onStatus?.("reconnecting");
+            if (timer || disposed) return;
+            const delay = Math.min(30000, 1000 * 2 ** attempt);
+            attempt += 1;
+            timer = setTimeout(() => {
+              timer = null;
+              if (disposed) return;
+              const stale = channel;
+              if (stale) dropChannel(stale);
+              connect();
+            }, delay);
+          }
+        });
+    };
+
+    const handleOnline = () => {
+      if (disposed) return;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      attempt = 0;
+      const stale = channel;
+      if (stale) dropChannel(stale);
+      connect();
+    };
+
+    const handleOffline = () => {
+      if (!disposed) onStatus?.("offline");
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    connect();
+
     return () => {
-      void this.client.removeChannel(channel);
+      disposed = true;
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      if (timer) clearTimeout(timer);
+      timer = null;
+      const stale = channel;
+      if (stale) dropChannel(stale);
     };
   }
 
   private async callAdmin<T = unknown>(adminKey: string, action: string, body?: unknown): Promise<T> {
     const base = adminFunctionUrl || `${supabaseUrl}/functions/v1/admin-moderation`;
-    const response = await fetch(`${base}?action=${action}`, {
-      method: body ? "POST" : "GET",
-      headers: { "Content-Type": "application/json", "x-admin-key": adminKey },
-      body: body ? JSON.stringify(body) : undefined
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => response.statusText);
-      throw new Error(text || `Admin API error ${response.status}`);
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, ADMIN_REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${base}?action=${action}`, {
+        method: body ? "POST" : "GET",
+        headers: { "Content-Type": "application/json", "x-admin-key": adminKey },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal
+      });
+      if (!response.ok) throw new Error(await adminResponseMessage(response));
+      return (await response.json()) as T;
+    } catch (error) {
+      if (timedOut) throw new Error("Request timed out");
+      throw error;
+    } finally {
+      clearTimeout(timer);
     }
-    return response.json() as Promise<T>;
   }
+}
+
+if (!hasSupabaseConfig() && import.meta.env.PROD) {
+  console.error(
+    "[AmmaOdisha] Supabase not configured — running with LOCAL DEMO DATA. Reports will NOT be saved."
+  );
 }
 
 export const backend: Backend = hasSupabaseConfig() ? new SupabaseBackend() : new LocalBackend();

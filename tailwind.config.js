@@ -4,8 +4,8 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["Google Sans Flex", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
-        mono: ["Google Sans Code", "SF Mono", "Fira Code", "monospace"]
+        sans: ["Segoe UI", "system-ui", "-apple-system", "Roboto", "Helvetica Neue", "Arial", "Noto Sans Oriya", "sans-serif"],
+        mono: ["ui-monospace", "SF Mono", "Fira Code", "monospace"]
       }
     }
   },

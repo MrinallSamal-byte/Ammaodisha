@@ -19,6 +19,22 @@ export function timeAgo(createdAt: string): string {
   return `${Math.floor(months / 12)}y ago`;
 }
 
+/** Translated relative time using the same thresholds as timeAgo. */
+export function timeAgoI18n(
+  value: string | number | Date,
+  t: (key: string, vars?: Record<string, string | number>) => string
+): string {
+  const diff = Math.max(0, Date.now() - new Date(value).getTime());
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return t("time.justNow");
+  if (minutes < 60) return t("units.minutesAgo", { count: minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return t("units.hoursAgo", { count: hours });
+  const days = Math.floor(hours / 24);
+  if (days === 1) return t("time.yesterday");
+  return t("units.daysAgo", { count: days });
+}
+
 /** Returns a short absolute date string like "Apr 5" or "Apr 5, 2024" for older dates. */
 export function shortDate(createdAt: string): string {
   const date = new Date(createdAt);

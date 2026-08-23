@@ -46,6 +46,22 @@ export function getWhatsAppUrl(message: string) {
   return `https://wa.me/${BMC_WHATSAPP}?text=${encodeURIComponent(message)}`;
 }
 
+/** Compact per-report share text: location, severity, days open, link. */
+export function buildReportShareText(report: GarbageReport, url: string) {
+  const severity = SEVERITY[report.severity]?.label ?? report.severity;
+  return [
+    `Location: ${report.address}`,
+    `Severity: ${severity}`,
+    `Days open: ${daysActive(report.created_at)}`,
+    `Link: ${url}`
+  ].join("\n");
+}
+
+export function shareReportViaWhatsApp(report: GarbageReport, url: string) {
+  const text = `${buildReportShareText(report, url)}\n\nvia Amma Odisha`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
+}
+
 async function copyText(text: string) {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);

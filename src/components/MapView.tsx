@@ -66,6 +66,8 @@ const WARD_LABEL_LAYER_ID = "wards-label";
 const CLUSTER_HINT_KEY = "nk_cluster_hint_seen";
 const FRESH_REPORT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAP_LEGEND_SEVERITIES: GarbageReport["severity"][] = ["small", "medium", "large", "massive"];
+const MOBILE_BREAKPOINT_PX = 768;
+const HOVER_MOVE_THROTTLE_MS = 32;
 
 function shouldShowClusterHint() {
   try {
@@ -189,14 +191,18 @@ export function MapView({
   const onSelectWardRef = useRef(onSelectWard);
   const onMapReadyRef = useRef(onMapReady);
   const hoverWardIdRef = useRef<number | null>(null);
+  const lastHoverMoveAtRef = useRef(0);
   const reportsByIdRef = useRef(new Map<string, GarbageReport>());
   const reportPointDataRef = useRef<ReportPointCollection>({ type: "FeatureCollection", features: [] });
-  const wardRenderDataRef = useRef<WardRenderCollection>(createWardRenderData(reports, wardBoundaries));
+  const wardRenderDataRef = useRef<WardRenderCollection>({ type: "FeatureCollection", features: [] });
   const [mapReady, setMapReady] = useState(false);
+  const [mapLoadError, setMapLoadError] = useState(false);
+  const [mapRetryNonce, setMapRetryNonce] = useState(0);
   const [showClusterHint, setShowClusterHint] = useState(shouldShowClusterHint);
   const [hoverWard, setHoverWard] = useState<HoverWard | null>(null);
   const [tapWardChip, setTapWardChip] = useState<TapWardChip | null>(null);
   const tapWardChipTimerRef = useRef<number | null>(null);
+  const tapWardNavigateTimerRef = useRef<number | null>(null);
   const reportPointData = useMemo(() => createReportPointData(reports, wardBoundaries), [reports, wardBoundaries]);
   const wardRenderData = useMemo(() => createWardRenderData(reports, wardBoundaries), [reports, wardBoundaries]);
   const coverageData = useMemo(() => createCoverageData(wardBoundaries, cityBoundary), [cityBoundary, wardBoundaries]);
@@ -235,6 +241,7 @@ export function MapView({
 
     let cancelled = false;
     let map: MapLibreMap | null = null;
+    let styleLoaded = false;
 
     void import("maplibre-gl").then(({ default: maplibre }) => {
       if (cancelled || !containerRef.current) return;
@@ -252,13 +259,18 @@ export function MapView({
       mapRef.current = map;
       map.addControl(new maplibre.NavigationControl({ showCompass: false }), "bottom-right");
       map.addControl(new maplibre.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }), "bottom-right");
+      map.addControl(new maplibre.AttributionControl({ compact: true }), "bottom-right");
+      map.on("error", () => {
+        if (!cancelled && !styleLoaded) setMapLoadError(true);
+      });
       map.on("load", () => {
         if (!map) return;
+        styleLoaded = true;
         map.fitBounds(coverageData.bounds, {
           duration: 0,
           maxZoom: CITY_ZOOM,
           padding:
-            window.innerWidth < 768
+            window.innerWidth < MOBILE_BREAKPOINT_PX
               ? { top: 28, right: 20, bottom: 104, left: 20 }
               : { top: 38, right: 64, bottom: 96, left: 64 }
         });
@@ -422,10 +434,11 @@ export function MapView({
             "circle-radius": ["get", "severitySize"],
             "circle-stroke-color": "#ffffff",
             "circle-stroke-width": 2.5,
-            "circle-opacity": ["case", ["==", ["get", "status"], "resolved"], 0.42, 1]
+            "circle-opacity": 1
           }
         });
         map.on("click", CLUSTER_LAYER_ID, (event) => {
+          if (map?.queryRenderedFeatures(event.point, { layers: [REPORT_LAYER_ID] }).length) return;
           const feature = map?.queryRenderedFeatures(event.point, { layers: [CLUSTER_LAYER_ID] })[0];
           const clusterId = Number(feature?.properties?.cluster_id);
           if (!map || !Number.isFinite(clusterId) || feature?.geometry.type !== "Point") return;
@@ -445,25 +458,36 @@ export function MapView({
           if (report) onSelectReportRef.current(report);
         });
         map.on("click", WARD_FILL_LAYER_ID, (event) => {
+          if (map?.queryRenderedFeatures(event.point, { layers: [CLUSTER_LAYER_ID, REPORT_LAYER_ID] }).length) return;
           const feature = event.features?.[0];
           const wardNumber = Number(feature?.properties?.ward_number);
           if (!wardNumber) return;
 
-          const isMobile = window.innerWidth < 640;
+          const isMobile = window.innerWidth < MOBILE_BREAKPOINT_PX;
           if (isMobile) {
             if (tapWardChipTimerRef.current != null) window.clearTimeout(tapWardChipTimerRef.current);
+            if (tapWardNavigateTimerRef.current != null) window.clearTimeout(tapWardNavigateTimerRef.current);
             setTapWardChip({
               wardName: String(feature?.properties?.ward_name ?? `Ward ${wardNumber}`),
               wardNumber,
               activeReportCount: Number(feature?.properties?.report_count ?? 0)
             });
             tapWardChipTimerRef.current = window.setTimeout(() => setTapWardChip(null), 3000);
-            window.setTimeout(() => onSelectWardRef.current(wardNumber), 320);
+            tapWardNavigateTimerRef.current = window.setTimeout(() => {
+              tapWardNavigateTimerRef.current = null;
+              if (tapWardChipTimerRef.current != null) window.clearTimeout(tapWardChipTimerRef.current);
+              tapWardChipTimerRef.current = null;
+              setTapWardChip(null);
+              onSelectWardRef.current(wardNumber);
+            }, 320);
           } else {
             onSelectWardRef.current(wardNumber);
           }
         });
         map.on("mousemove", WARD_FILL_LAYER_ID, (event) => {
+          const now = Date.now();
+          if (now - lastHoverMoveAtRef.current < HOVER_MOVE_THROTTLE_MS) return;
+          lastHoverMoveAtRef.current = now;
           const feature = event.features?.[0];
           const wardNumber = Number(feature?.properties?.ward_number);
           if (!map || !Number.isFinite(wardNumber)) return;
@@ -503,6 +527,8 @@ export function MapView({
         setMapReady(true);
         onMapReadyRef.current?.();
       });
+    }).catch(() => {
+      if (!cancelled) setMapLoadError(true);
     });
 
     return () => {
@@ -514,8 +540,12 @@ export function MapView({
         window.clearTimeout(tapWardChipTimerRef.current);
         tapWardChipTimerRef.current = null;
       }
+      if (tapWardNavigateTimerRef.current != null) {
+        window.clearTimeout(tapWardNavigateTimerRef.current);
+        tapWardNavigateTimerRef.current = null;
+      }
     };
-  }, [coverageData, wardBoundaries]);
+  }, [coverageData, mapRetryNonce, wardBoundaries]);
 
   useEffect(() => {
     const source = mapRef.current?.getSource(REPORT_SOURCE_ID) as GeoJSONSource | undefined;
@@ -554,7 +584,7 @@ export function MapView({
     const bounds = getFeatureBounds(feature);
     if (!bounds) return;
 
-    const isMobile = window.innerWidth < 768;
+    const isMobile = window.innerWidth < MOBILE_BREAKPOINT_PX;
     map.fitBounds(
       bounds,
       {
@@ -567,9 +597,23 @@ export function MapView({
     );
   }, [focusWardNumber, focusRequestId, wardBoundaries]);
 
+  function handleMapRetry() {
+    setMapLoadError(false);
+    setMapReady(false);
+    setMapRetryNonce((nonce) => nonce + 1);
+  }
+
   return (
     <div className="map-shell" aria-label="Amma Odisha Bhubaneswar garbage map">
       <div className="map-canvas" ref={containerRef} />
+      {mapLoadError && (
+        <div className="map-shell map-loading-shell" role="alert">
+          <div className="map-loading-pill">
+            Map failed to load.
+            <button type="button" onClick={handleMapRetry}>Retry</button>
+          </div>
+        </div>
+      )}
       <div className="map-stats-pill" aria-label="Visible map report statistics">
         <span>
           <strong>{activeReportCount}</strong>
@@ -603,6 +647,9 @@ export function MapView({
           <em>{hoverWard.reportCount} reports</em>
         </div>
       )}
+      <span className="sr-only" aria-live="polite">
+        {hoverWard ? `${hoverWard.wardName}, Ward ${hoverWard.wardNumber}` : ""}
+      </span>
       {tapWardChip && (
         <div className="map-ward-tap-chip" aria-live="polite" aria-atomic="true">
           <strong>{tapWardChip.wardName || `Ward ${tapWardChip.wardNumber}`}</strong>

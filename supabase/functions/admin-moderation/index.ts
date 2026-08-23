@@ -1,12 +1,19 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.87.1";
 
+const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const adminKey = Deno.env.get("ADMIN_KEY") ?? "";
+const supabase = createClient(supabaseUrl, serviceRoleKey);
+const MODERATION_STATUSES = new Set(["flagged", "approved", "rejected"]);
+
+// Loopback origins are only trusted when the function runs against a local
+// Supabase stack; deployed projects must opt in via ADMIN_ALLOWED_ORIGINS.
+const isLocalRuntime = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(supabaseUrl);
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://ammaodisha.me",
   "https://www.ammaodisha.me",
   "https://ammaodisha.vercel.app",
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-  "http://127.0.0.1:4173"
+  ...(isLocalRuntime ? ["http://localhost:5173", "http://127.0.0.1:5173", "http://127.0.0.1:4173"] : [])
 ];
 const allowedOrigins = new Set(
   (Deno.env.get("ADMIN_ALLOWED_ORIGINS") ?? DEFAULT_ALLOWED_ORIGINS.join(","))
@@ -23,12 +30,6 @@ const deniedCorsHeaders = {
   ...baseCorsHeaders,
   "Access-Control-Allow-Origin": "null"
 };
-
-const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const adminKey = Deno.env.get("ADMIN_KEY") ?? "";
-const supabase = createClient(supabaseUrl, serviceRoleKey);
-const MODERATION_STATUSES = new Set(["flagged", "approved", "rejected"]);
 
 Deno.serve(async (request) => {
   const origin = (request.headers.get("Origin") ?? "").trim();
@@ -49,17 +50,29 @@ Deno.serve(async (request) => {
 
   try {
     if (action === "stats") return json(await stats(), 200, corsHeaders);
-    if (action === "queue") return json({ reports: await queue(url.searchParams.get("status") ?? "flagged") }, 200, corsHeaders);
+    if (action === "queue") {
+      const queueBody = request.method === "POST" ? await readJsonBody(request) : {};
+      const limit = clampLimit(queueBody.limit);
+      const pageOffset = clampOffset(queueBody.offset);
+      return json(await queue(url.searchParams.get("status") ?? "flagged", limit, pageOffset), 200, corsHeaders);
+    }
 
-    const body = request.method === "POST" ? await request.json() : {};
-    if (action === "moderate") return json(await moderate(body.reportId, body.decision), 200, corsHeaders);
+    const body = request.method === "POST" ? await readJsonBody(request) : {};
+    if (action === "moderate") {
+      const rejectionReason = typeof body.rejection_reason === "string" && body.rejection_reason.trim()
+        ? body.rejection_reason.trim()
+        : undefined;
+      return json(await moderate(body.reportId, body.decision, rejectionReason), 200, corsHeaders);
+    }
     if (action === "bulk") return json(await bulk(body.reportIds ?? [], body.decision), 200, corsHeaders);
     if (action === "swap_duplicate") return json(await swapDuplicate(body.reportId, body.existingId), 200, corsHeaders);
     if (action === "reject_both") return json(await rejectBoth(body.reportId, body.existingId), 200, corsHeaders);
 
     return json({ error: "Unknown action" }, 404, corsHeaders);
   } catch (error) {
-    return json({ error: error instanceof Error ? error.message : "Unexpected error" }, 500, corsHeaders);
+    // Keep the response generic; the detail goes to the function logs only.
+    console.error(`[admin-moderation] action=${action} failed:`, error);
+    return json({ error: "Request failed. Try again." }, 500, corsHeaders);
   }
 });
 
@@ -88,40 +101,62 @@ async function stats() {
   return { total: total ?? 0, flagged: flagged ?? 0, rejected: rejected ?? 0, approved: approved ?? 0 };
 }
 
-async function queue(status: string) {
+async function queue(status: string, limit = 50, pageOffset = 0) {
   assertModerationStatus(status);
   const { data, error } = await supabase
     .from("garbage_reports")
     .select("*")
     .eq("moderation_status", status)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .range(pageOffset, pageOffset + limit);
   if (error) throw error;
-  return data ?? [];
+  const rows = data ?? [];
+  // Fetch one extra row so hasMore is known without a second round trip.
+  return { reports: rows.slice(0, limit), hasMore: rows.length > limit };
 }
 
-async function moderate(reportId: string, decision: string) {
+async function fetchModerationMetadata(reportIds: string[]) {
+  const metadataById = new Map<string, Record<string, unknown>>();
+  if (!reportIds.length) return metadataById;
+  const { data, error } = await supabase
+    .from("garbage_reports")
+    .select("id, moderation_metadata")
+    .in("id", reportIds);
+  if (error) throw error;
+  (data ?? []).forEach((row: { id: string; moderation_metadata?: Record<string, unknown> | null }) => {
+    metadataById.set(row.id, row.moderation_metadata ?? {});
+  });
+  return metadataById;
+}
+
+function mergeModerationMetadata(existing: Record<string, unknown> | undefined, decisionSource: string, rejectionReason?: string) {
+  const merged: Record<string, unknown> = {
+    ...(existing ?? {}),
+    moderated_at: new Date().toISOString(),
+    decision_source: decisionSource
+  };
+  if (rejectionReason !== undefined && rejectionReason !== "") merged.rejection_reason = rejectionReason;
+  return merged;
+}
+
+async function moderate(reportId: string, decision: string, rejectionReason?: string) {
   assertModerationStatus(decision);
+
+  const existingMetadata = await fetchModerationMetadata([reportId]);
+  const currentMeta = existingMetadata.get(reportId);
 
   // When approving a cleanup-proof submission, also mark the report resolved
   const extraFields: Record<string, unknown> = {};
-  if (decision === "approved") {
-    const { data: existing } = await supabase
-      .from("garbage_reports")
-      .select("moderation_metadata")
-      .eq("id", reportId)
-      .maybeSingle();
-    const meta = (existing?.moderation_metadata ?? {}) as Record<string, unknown>;
-    if (meta.cleanup_pending === true) {
-      extraFields.status = "resolved";
-      extraFields.resolved_at = new Date().toISOString();
-    }
+  if (decision === "approved" && currentMeta?.cleanup_pending === true) {
+    extraFields.status = "resolved";
+    extraFields.resolved_at = new Date().toISOString();
   }
 
   const { error } = await supabase
     .from("garbage_reports")
     .update({
       moderation_status: decision,
-      moderation_metadata: { moderated_at: new Date().toISOString(), decision_source: "admin" },
+      moderation_metadata: mergeModerationMetadata(currentMeta, "admin", rejectionReason),
       ...extraFields
     })
     .eq("id", reportId);
@@ -131,14 +166,22 @@ async function moderate(reportId: string, decision: string) {
 
 async function bulk(reportIds: string[], decision: string) {
   assertModerationStatus(decision);
-  const { error } = await supabase
-    .from("garbage_reports")
-    .update({
-      moderation_status: decision,
-      moderation_metadata: { moderated_at: new Date().toISOString(), decision_source: "admin_bulk" }
-    })
-    .in("id", reportIds);
-  if (error) throw error;
+
+  // Update rows individually so each report keeps its existing audit trail.
+  const existingMetadata = await fetchModerationMetadata(reportIds);
+  const results = await Promise.all(
+    [...existingMetadata.keys()].map((reportId) =>
+      supabase
+        .from("garbage_reports")
+        .update({
+          moderation_status: decision,
+          moderation_metadata: mergeModerationMetadata(existingMetadata.get(reportId), "admin_bulk")
+        })
+        .eq("id", reportId)
+    )
+  );
+  const firstError = results.find((result) => result.error)?.error;
+  if (firstError) throw firstError;
   return { success: true };
 }
 
@@ -158,6 +201,27 @@ function json(body: unknown, status = 200, corsHeaders: Record<string, string>) 
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" }
   });
+}
+
+async function readJsonBody(request: Request): Promise<Record<string, any>> {
+  try {
+    const parsed = await request.json();
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function clampLimit(value: unknown) {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed)) return 50;
+  return Math.min(Math.max(parsed, 1), 200);
+}
+
+function clampOffset(value: unknown) {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return parsed;
 }
 
 function getCorsHeaders(origin: string) {

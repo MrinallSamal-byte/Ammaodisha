@@ -6,7 +6,7 @@
    Design Tokens
    ═══════════════════════════════════════════════════════════════ */
 :root {
-  font-family: "Google Sans Flex", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, "Noto Sans Oriya", sans-serif;
   color: var(--text);
   background: var(--surface);
   font-synthesis: none;
@@ -204,7 +204,7 @@ button:focus-visible, a:focus-visible {
 }
 
 /* MapLibre overrides */
-.maplibregl-map { font-family: "Google Sans Flex", sans-serif !important; }
+.maplibregl-map { font-family: "Segoe UI", system-ui, "Noto Sans Oriya", sans-serif !important; }
 .maplibregl-ctrl-attrib {
   background: transparent !important;
   color: #8b95a2 !important;
@@ -266,7 +266,7 @@ button:focus-visible, a:focus-visible {
 }
 
 .garbage-cluster-marker strong {
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 14px;
   font-weight: 900;
 }
@@ -313,7 +313,7 @@ button:focus-visible, a:focus-visible {
 
 .map-stats-pill strong {
   color: var(--primary);
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 18px;
   line-height: 1;
 }
@@ -441,7 +441,7 @@ button:focus-visible, a:focus-visible {
 
 .map-ward-tap-chip em {
   color: var(--primary);
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   font-style: normal;
   font-weight: 900;
@@ -783,7 +783,7 @@ button:focus-visible, a:focus-visible {
   border-radius: var(--radius-pill);
   background: var(--primary);
   color: #ffffff;
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 10px;
 }
 
@@ -825,8 +825,8 @@ button:focus-visible, a:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 44px;
+  height: 44px;
   flex-shrink: 0;
   margin-left: 2px;
   border: 0;
@@ -1074,7 +1074,7 @@ button:focus-visible, a:focus-visible {
 }
 
 .insights-button strong {
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
 }
 
@@ -1205,7 +1205,7 @@ button:focus-visible, a:focus-visible {
 .stat strong, .stat span { display: block; }
 
 .stat strong {
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 18px;
   line-height: 1;
 }
@@ -1289,7 +1289,7 @@ button:focus-visible, a:focus-visible {
 }
 
 .list-stat strong {
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 14px;
 }
 
@@ -1397,7 +1397,7 @@ button:focus-visible, a:focus-visible {
   border-radius: var(--radius-sm);
   background: var(--primary-soft);
   color: var(--primary);
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-weight: 900;
   line-height: 1;
 }
@@ -1749,7 +1749,7 @@ button:focus-visible, a:focus-visible {
 .eyebrow {
   margin: 0 0 5px;
   color: var(--text-faint);
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 10px;
   font-weight: 900;
   text-transform: uppercase;
@@ -1819,8 +1819,8 @@ button:focus-visible, a:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   border: 1px solid var(--line);
   background: var(--surface-soft);
@@ -1837,8 +1837,8 @@ button:focus-visible, a:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 44px;
+  height: 44px;
   flex: 0 0 auto;
   border-radius: 50%;
   background: var(--surface-muted);
@@ -1958,7 +1958,7 @@ button:focus-visible, a:focus-visible {
 
 .detail-stat strong {
   display: block;
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 22px;
   font-weight: 900;
   line-height: 1;
@@ -1966,7 +1966,7 @@ button:focus-visible, a:focus-visible {
 }
 
 .detail-stat-text strong {
-  font-family: "Google Sans Flex", -apple-system, sans-serif;
+  font-family: "Segoe UI", system-ui, -apple-system, "Noto Sans Oriya", sans-serif;
   font-size: 15px;
   font-weight: 900;
   letter-spacing: 0;
@@ -2066,7 +2066,7 @@ button:focus-visible, a:focus-visible {
 .metric strong {
   overflow-wrap: anywhere;
   color: var(--text-strong);
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 16px;
   letter-spacing: -0.3px;
 }
@@ -2533,7 +2533,7 @@ button:focus-visible, a:focus-visible {
 
 .priority-report-score strong {
   color: var(--primary);
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 16px;
   line-height: 1;
 }
@@ -2617,7 +2617,7 @@ button:focus-visible, a:focus-visible {
 .ward-bar-track b {
   flex-shrink: 0;
   color: var(--text-muted);
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   font-weight: 900;
 }
@@ -2725,7 +2725,7 @@ button:focus-visible, a:focus-visible {
 }
 
 .intro-card-body b {
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 10px;
 }
 
@@ -2841,7 +2841,7 @@ button:focus-visible, a:focus-visible {
 
 .field > span {
   color: var(--text-faint);
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   font-weight: 900;
   text-transform: uppercase;
@@ -2852,7 +2852,7 @@ button:focus-visible, a:focus-visible {
 
 .field-label {
   color: var(--text-faint);
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   font-weight: 900;
   text-transform: uppercase;
@@ -3322,7 +3322,7 @@ button:focus-visible, a:focus-visible {
   padding: 0 8px;
   background: var(--surface-soft);
   color: var(--text-muted);
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 10px;
   font-weight: 900;
   transition: background var(--transition-smooth);
@@ -3373,7 +3373,7 @@ button:focus-visible, a:focus-visible {
   padding: 12px;
   background: var(--surface-soft);
   color: var(--text);
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -3581,7 +3581,7 @@ button:focus-visible, a:focus-visible {
 .mobile-qr-url {
   margin: 0 0 16px;
   color: var(--text-faint);
-  font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   font-weight: 900;
   word-break: break-all;
@@ -3644,7 +3644,7 @@ button:focus-visible, a:focus-visible {
   margin-top: 6px;
   color: var(--text-faint);
   font-size: 11px;
-  font-family: "Google Sans Code", ui-monospace, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   word-break: break-all;
 }
 
@@ -3784,7 +3784,7 @@ button:focus-visible, a:focus-visible {
 }
 
 .admin-stats strong, .admin-stats span { display: block; }
-.admin-stats strong { font-family: "Google Sans Code", ui-monospace, SFMono-Regular, monospace; font-size: 18px; }
+.admin-stats strong { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 18px; }
 .admin-stats span { color: var(--text-faint); font-size: 10px; }
 
 .admin-tabs {
@@ -4402,3 +4402,373 @@ button:focus-visible, a:focus-visible {
   line-height: 1.5;
   font-weight: 500;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   UX Enhancements — language toggle, My Reports sheet,
+   escalation chips/dots, trust block, freshness note,
+   WhatsApp share, quota note, duplicate warning
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Language toggle + My Reports header entry */
+.lang-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 11px;
+  background: var(--surface-soft);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background var(--transition-smooth), color var(--transition-smooth), transform var(--transition-fast);
+}
+
+.lang-toggle-button:hover {
+  background: var(--surface);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.my-reports-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--surface-soft);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  transition: background var(--transition-smooth), color var(--transition-smooth), transform var(--transition-fast);
+}
+
+.my-reports-entry:hover {
+  background: var(--surface);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.my-reports-entry svg { flex: 0 0 auto; }
+
+@media (max-width: 720px) {
+  .my-reports-entry span { display: none; }
+  .my-reports-entry { padding: 0 14px; }
+}
+
+/* Freshness indicator near the list header */
+.freshness-note {
+  margin: 0;
+  padding: 8px 16px 0;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Escalation pills + list dots */
+.pill.amber { background: #fff7e6; color: #b26a00; }
+.pill.orange { background: #fff3e8; color: #c24f00; }
+
+.escalation-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+
+.report-item-tags .aging-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  margin-bottom: 2px;
+  border-radius: var(--radius-pill);
+  background: #ea580c;
+}
+
+.report-item-tags .aging-dot.is-critical { background: #dc2626; }
+
+/* Trust block on report detail */
+.detail-trust-block {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  padding: 10px 18px 2px;
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 12px;
+}
+
+.trust-verified-chip { font-size: 10px; min-height: 21px; }
+.trust-verified-chip svg { width: 11px; height: 11px; }
+
+.trust-dates {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.trust-meta {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.trust-meta > span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.trust-photo-credit {
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.trust-photo-credit a {
+  color: var(--blue);
+  text-decoration: underline;
+  text-decoration-color: rgb(59 130 246 / 40%);
+}
+
+/* WhatsApp share button on detail header */
+.whatsapp-share-btn {
+  color: #128c7e;
+  border-color: #bfe8dc;
+}
+
+.whatsapp-share-btn:hover {
+  background: #effaf6;
+  color: #0c6b5f;
+}
+
+/* Quota note in form footer */
+.form-footer-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.quota-note {
+  margin: 0 0 8px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.form-footer-meta .form-trust-badge { margin-bottom: 8px; }
+
+/* Duplicate warning card (report form review step) */
+.duplicate-warning span > strong { margin-bottom: 4px; }
+
+.duplicate-match {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.duplicate-match em {
+  font-style: normal;
+  font-weight: 800;
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duplicate-view-action,
+.my-report-view-action {
+  width: auto;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+  box-shadow: none;
+}
+
+.duplicate-match .duplicate-view-action { flex: 0 0 auto; margin-left: auto; }
+
+/* My Reports sheet */
+.my-reports-sheet { display: flex; flex-direction: column; }
+
+.my-reports-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  overflow-y: auto;
+}
+
+.my-report-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.my-report-info {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.my-report-info strong {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.my-report-info small {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-chip.is-live { background: #fff7e6; color: #b26a00; }
+.status-chip.is-review { background: #f3f4f6; color: var(--text-muted); }
+
+/* ═══════════════════════════════════════════════════════════════
+   Odia (html[lang="or"]) typography overrides
+   ═══════════════════════════════════════════════════════════════ */
+html[lang="or"] {
+  font-family: "Noto Sans Oriya", "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+html[lang="or"] .maplibregl-map {
+  font-family: "Noto Sans Oriya", system-ui, sans-serif !important;
+}
+
+html[lang="or"] .detail-stat-text strong {
+  font-family: "Noto Sans Oriya", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+html[lang="or"] .eyebrow,
+html[lang="or"] .detail-content > h3,
+html[lang="or"] .detail-stat span,
+html[lang="or"] .sheet-breadcrumb {
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+html[lang="or"] .severity-chip,
+html[lang="or"] .status-chip,
+html[lang="or"] .trust-verified-chip,
+html[lang="or"] .lang-toggle-button,
+html[lang="or"] .pill {
+  line-height: 1.45;
+}
+
+html[lang="or"] .severity-chip,
+html[lang="or"] .status-chip {
+  min-height: 26px;
+}
+
+html[lang="or"] .trust-verified-chip {
+  min-height: 25px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Admin moderation + connection status
+   ═══════════════════════════════════════════════════════════════ */
+.moderation-card.is-focused {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.compare-grid figure { margin: 0; }
+
+.compare-grid img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
+  background: #eee;
+}
+
+.compare-grid figcaption {
+  font-size: 11px;
+  font-weight: 700;
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.kbd-hints {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  opacity: 0.75;
+  padding: 4px 0;
+}
+
+.kbd-hints kbd {
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 10px;
+}
+
+.conn-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(234, 88, 12, 0.12);
+  color: #c2410c;
+}
+
+.conn-badge.is-live {
+  background: rgba(22, 163, 74, 0.12);
+  color: #15803d;
+}
+
+.reject-popover {
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  background: #fff;
+}
+
+.reject-popover select,
+.reject-popover textarea {
+  font: inherit;
+  padding: 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.my-report-row button.view-deep { margin-top: 4px; }

@@ -2,6 +2,7 @@ import clsx from "clsx";
 import {
   ArrowUpRight,
   BarChart3,
+  Bookmark,
   Camera,
   CheckCircle2,
   ChevronLeft,
@@ -23,7 +24,6 @@ import {
   Share2,
   ShieldCheck,
   SlidersHorizontal,
-  Sparkles,
   Smartphone,
   ThumbsUp,
   Trophy,
@@ -32,15 +32,20 @@ import {
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { BMC_CONTACTS, BMC_HELPLINE, BMC_NUMBER, CHANGELOG, CATEGORIES, PARTY_COLORS, SEVERITY, STATUS_LABELS } from "../services/constants";
 import { backend } from "../services/backend";
-import { findNearestWard, findWardInGeoJson, isInsideBoundary } from "../services/geo";
+import { findNearbyReports, type NearbyMatch } from "../services/duplicate-check";
+import { escalationLevel } from "../services/escalation";
+import { distanceKm, findNearestWard, findWardInGeoJson, isInsideBoundary } from "../services/geo";
+import { t, useLang } from "../services/i18n";
 import { canSubmitReport, hasUpvoted } from "../services/limits";
+import { getMyReports, trackMyReport } from "../services/my-reports";
 import { LOCAL_REPORT_PHOTO_FALLBACK_URL, ODISHA_GARBAGE_FALLBACK_IMAGE } from "../services/report-images";
-import { generateBMCComplaint, getReportShareText, getWhatsAppUrl, shareOrCopy } from "../services/share";
-import { daysActive, timeAgo } from "../services/time";
+import { generateBMCComplaint, getReportShareText, getWhatsAppUrl, shareOrCopy, shareReportViaWhatsApp } from "../services/share";
+import { daysActive, shortDate, timeAgoI18n } from "../services/time";
 import type {
   CivicData,
   GarbageReport,
   NewReportInput,
+  RealtimeConnectionStatus,
   Representative,
   SeverityKey,
   Ward,
@@ -50,26 +55,51 @@ import type {
 const MapView = lazy(async () => ({ default: (await import("./MapView")).MapView }));
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-const APP_VERSION = "0.3.0";
 const POPULAR_WARD_NUMBERS = [40, 30, 36, 37, 38, 41, 34, 19];
+const SEVERITY_I18N_KEYS: Record<SeverityKey, "low" | "medium" | "high" | "critical"> = {
+  small: "low",
+  medium: "medium",
+  large: "high",
+  massive: "critical"
+};
 const SEVERITY_SHORT_DESCRIPTIONS: Record<SeverityKey, string> = {
   small: "Under 1m²",
   medium: "About 1–5m²",
   large: "Covers 5–20m²",
   massive: "20m²+ or a full stretch"
 };
-const SEVERITY_FILTER_OPTIONS: { key: "all" | SeverityKey; label: string }[] = [
-  { key: "all", label: "All severity" },
-  { key: "small", label: "Minor (under 1m²)" },
-  { key: "medium", label: "Moderate (1-5m²)" },
-  { key: "large", label: "Serious (5-20m²)" },
-  { key: "massive", label: "Critical (20m²+)" }
-];
 const SEVERITY_PRIORITY: Record<SeverityKey, number> = {
   small: 1,
   medium: 2,
   large: 3,
   massive: 4
+};
+const SEVERITY_TEXT_COLORS: Record<SeverityKey, string> = {
+  small: "#B45309",
+  medium: "#C2410C",
+  large: "#B91C1C",
+  massive: "#991B1B"
+};
+
+// Dark, contrast-safe text variants of PARTY_COLORS for use as text on light
+// backgrounds (raw party hues like TDP #FFD600 fail contrast as text color).
+const PARTY_TEXT_COLORS: Record<string, string> = {
+  BJP: "#B45309",
+  BJD: "#047857",
+  INC: "#0369A1",
+  JDS: "#15803D",
+  AAP: "#4338CA",
+  SP: "#B91C1C",
+  BSP: "#1E40AF",
+  TMC: "#15803D",
+  DMK: "#B91C1C",
+  YSRCP: "#6D28D9",
+  TDP: "#A16207",
+  SS: "#C2410C",
+  NCP: "#1D4ED8",
+  RJD: "#C2410C",
+  JDU: "#0F766E",
+  INDEPENDENT: "#546E7A"
 };
 
 type RouteSelection =
@@ -80,7 +110,13 @@ type RouteSelection =
   | null;
 type ProfileSelection = Extract<Exclude<RouteSelection, null>, { type: "ward" | "mla" | "mp" }>;
 
+type ExternalPreviewAction =
+  | { kind: "maps"; value: string }
+  | { kind: "tel"; value: string }
+  | { kind: "whatsapp"; value: string };
+
 interface ExternalPreviewConfig {
+  action: ExternalPreviewAction;
   confirmLabel: string;
   details: string;
   helper: string;
@@ -89,7 +125,10 @@ interface ExternalPreviewConfig {
 
 interface PublicAppProps {
   autoOpenReport?: boolean;
+  connectionStatus?: RealtimeConnectionStatus;
   data: CivicData;
+  lastRefreshedAt?: string | null;
+  onSuccessfulRefresh?: () => void;
   routeSelection: RouteSelection;
   routeState?: {
     returnProfile?: { id: string; type: "ward" | "mla" | "mp" } | null;
@@ -139,6 +178,14 @@ function getDistinctWardName(ward?: Pick<Ward, "ward_number" | "ward_name"> | nu
 function getWardSelectLabel(ward: Ward) {
   const distinctName = getDistinctWardName(ward);
   return distinctName ? `Ward ${ward.ward_number} - ${distinctName}` : `Ward ${ward.ward_number}`;
+}
+
+function severityLabel(severity: SeverityKey) {
+  return t(`severity.${SEVERITY_I18N_KEYS[severity]}`);
+}
+
+function daysOpen(report: GarbageReport) {
+  return daysActive(report.created_at);
 }
 
 function getWardSearchText(ward: Ward) {
@@ -198,6 +245,12 @@ function DialogSurface({
   const dialogRef = useRef<HTMLElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const dragRef = useRef<{ active: boolean; lastDelta: number; pointerId: number; startY: number } | null>(null);
+  const onCloseRef = useRef(onClose);
+  const disableEscapeRef = useRef(disableEscape);
+  const disableFocusTrapRef = useRef(disableFocusTrap);
+  onCloseRef.current = onClose;
+  disableEscapeRef.current = disableEscape;
+  disableFocusTrapRef.current = disableFocusTrap;
   const supportsSwipeDismiss = className
     .split(/\s+/)
     .some((name) => ["detail-sheet", "form-sheet", "profile-sheet", "insights-sheet", "filter-sheet"].includes(name));
@@ -208,18 +261,19 @@ function DialogSurface({
 
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const frame = window.requestAnimationFrame(() => {
+      const preferredFocus = dialog.querySelector<HTMLElement>("[data-autofocus]");
       const firstFocusable = getFocusableElements(dialog)[0];
-      (firstFocusable ?? dialog).focus({ preventScroll: true });
+      (preferredFocus ?? firstFocusable ?? dialog).focus({ preventScroll: true });
     });
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !disableEscape) {
+      if (event.key === "Escape" && !disableEscapeRef.current) {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
-      if (event.key !== "Tab" || disableFocusTrap) return;
+      if (event.key !== "Tab" || disableFocusTrapRef.current) return;
 
       const focusable = getFocusableElements(dialog);
       if (!focusable.length) {
@@ -250,7 +304,7 @@ function DialogSurface({
       document.removeEventListener("keydown", onKeyDown);
       previousFocusRef.current?.focus({ preventScroll: true });
     };
-  }, [disableEscape, disableFocusTrap, onClose]);
+  }, []);
 
   return (
     <div
@@ -321,7 +375,8 @@ function DialogSurface({
   );
 }
 
-export function PublicApp({ autoOpenReport = false, data, routeSelection, routeState, onDataChange, navigate }: PublicAppProps) {
+export function PublicApp({ autoOpenReport = false, connectionStatus, data, lastRefreshedAt = null, onSuccessfulRefresh, routeSelection, routeState, onDataChange, navigate }: PublicAppProps) {
+  const [lang, setLang] = useLang();
   const [reports, setReports] = useState(data.reports);
   const [selectedReport, setSelectedReport] = useState<GarbageReport | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<RouteSelection>(null);
@@ -335,6 +390,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
   const [wardFilterState, setWardFilterState] = useState<"idle" | "locating" | "error">("idle");
   const [showReportForm, setShowReportForm] = useState(false);
   const [showInsights, setShowInsights] = useState(false);
+  const [showMyReports, setShowMyReports] = useState(false);
   const [showIntro, setShowIntro] = useState(() => readStorageValue("nk_intro_seen") !== "1");
   const [showAbout, setShowAbout] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
@@ -350,12 +406,19 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
   const [statusFilter, setStatusFilter] = useState<"all" | "unresolved" | "resolved">("all");
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState("");
+  const [routeReportLoading, setRouteReportLoading] = useState(false);
+  const [routeFetchedReport, setRouteFetchedReport] = useState<GarbageReport | null>(null);
+  const fetchedRouteReportIdRef = useRef<string | null>(null);
 
   const wardsByNumber = useMemo(() => new globalThis.Map(data.wards.map((ward) => [ward.ward_number, ward])), [data.wards]);
 
   useEffect(() => {
     setReports(data.reports);
   }, [data.reports]);
+
+  useEffect(() => {
+    if (viewMode !== "map") setMapLoaded(false);
+  }, [viewMode]);
 
   useEffect(() => {
     if (!autoOpenReport) return;
@@ -394,11 +457,14 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
       setSelectedProfile(null);
       setReturnProfile(null);
       setReturnReport(null);
+      setRouteFetchedReport(null);
+      setRouteReportLoading(false);
       return;
     }
     if (routeSelection.type === "report") {
       const report = reports.find((item) => item.id === routeSelection.id);
       if (report) setSelectedReport(report);
+      else if (routeFetchedReport?.id === routeSelection.id) setSelectedReport(routeFetchedReport);
       setSelectedProfile(null);
       setReturnProfile(storedReturnProfile);
       setReturnReport(null);
@@ -408,7 +474,32 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
       setReturnReport(storedReturnReport);
       setReturnProfile(null);
     }
-  }, [reports, routeSelection, routeState]);
+  }, [reports, routeFetchedReport, routeSelection, routeState]);
+
+  useEffect(() => {
+    if (routeSelection?.type !== "report") return;
+    const reportId = routeSelection.id;
+    if (reports.some((item) => item.id === reportId)) return;
+    if (fetchedRouteReportIdRef.current === reportId) return;
+    fetchedRouteReportIdRef.current = reportId;
+    let cancelled = false;
+    setRouteFetchedReport(null);
+    setRouteReportLoading(true);
+    backend
+      .fetchReportById(reportId)
+      .then((report) => {
+        if (!cancelled) setRouteFetchedReport(report);
+      })
+      .catch(() => {
+        if (!cancelled) setRouteFetchedReport(null);
+      })
+      .finally(() => {
+        if (!cancelled) setRouteReportLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reports, routeSelection]);
 
   const representativeSearchByWard = useMemo(() => {
     const mlaByConstituency = new Map<string, Representative>();
@@ -493,6 +584,14 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
     return { unresolved: nextUnresolved, resolved: nextResolved };
   }, [reports]);
   const worstWards = useMemo(() => getWorstWards(filteredReports, data.wards), [filteredReports, data.wards]);
+  const introStats = useMemo(
+    () => ({
+      wardCount: data.wards.length,
+      mlaCount: new Set(data.representatives.filter((rep) => rep.role === "mla").map((rep) => rep.constituency)).size,
+      mpCount: new Set(data.representatives.filter((rep) => rep.role === "mp").map((rep) => rep.constituency)).size
+    }),
+    [data.representatives, data.wards]
+  );
   const filteredWard = wardFilterNumber != null ? wardsByNumber.get(wardFilterNumber) : null;
   const hasActiveFilters =
     Boolean(searchQuery.trim()) || severityFilter !== "all" || statusFilter !== "all" || wardFilterNumber != null;
@@ -506,6 +605,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
       const nextReports = await backend.fetchReports();
       setReports(nextReports);
       onDataChange({ ...data, reports: nextReports });
+      onSuccessfulRefresh?.();
     } catch (err) {
       console.error("Refresh failed", err);
       setRefreshError("Could not refresh reports. Check your connection and try again.");
@@ -646,13 +746,26 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
       ? "Clear filters to bring active map markers back."
       : "New approved reports will appear here as active map markers.";
 
+  const connectionBadge =
+    connectionStatus === "live" ? (
+      <span className="conn-badge is-live">{t("conn.live")}</span>
+    ) : connectionStatus === "reconnecting" || (connectionStatus === "offline" && navigator.onLine !== false) ? (
+      <span className="conn-badge">{t("conn.reconnecting")}</span>
+    ) : null;
+  const freshnessNote = !refreshing && lastRefreshedAt && (
+    <p className="freshness-note" role="status">
+      {t("freshness.updated")} {timeAgoI18n(lastRefreshedAt, t)}
+      {connectionBadge}
+    </p>
+  );
+
   return (
     <div className="app-frame">
       {viewMode === "map" && (
         <Suspense
           fallback={
-            <div className="map-shell map-loading-shell" aria-label="Loading map">
-              <div className="map-loading-pill">Loading map...</div>
+            <div className="map-shell map-loading-shell" aria-label={t("map.loading")}>
+              <div className="map-loading-pill">{t("map.loading")}</div>
             </div>
           }
         >
@@ -682,6 +795,28 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
         </div>
         <div className="topbar-actions">
           <button
+            className="lang-toggle-button"
+            type="button"
+            onClick={() => setLang(lang === "en" ? "or" : "en")}
+            aria-label={lang === "en" ? t("aria.switchToOdia") : t("aria.switchToEnglish")}
+            title={t("action.language")}
+          >
+            {lang === "en" ? "ଓଡ଼ିଆ" : "EN"}
+          </button>
+          <span className="sr-only" role="status">
+            {lang === "en" ? t("aria.langChangedEnglish") : t("aria.langChangedOdia")}
+          </span>
+          <button
+            className="my-reports-entry"
+            type="button"
+            onClick={() => setShowMyReports(true)}
+            aria-label={t("nav.myReports")}
+            title={t("nav.myReports")}
+          >
+            <Bookmark size={16} />
+            <span>{t("nav.myReports")}</span>
+          </button>
+          <button
             className="icon-button"
             onClick={() => setShowAbout(true)}
             aria-label="About Amma Odisha"
@@ -695,49 +830,49 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
       <section className="control-dock" aria-label="Map and report controls">
         <div className="quick-filter-group" aria-label="Quick filters">
           <label className="quick-select">
-            <span className="sr-only">Severity</span>
+            <span className="sr-only">{t("filters.severity")}</span>
             <select
               name="severityFilter"
               value={severityFilter}
               onChange={(event) => setSeverityFilter(event.target.value as "all" | SeverityKey)}
-              aria-label="Filter by severity"
+              aria-label={t("filters.bySeverity")}
             >
-              <option value="all">All Severity</option>
-              <option value="small">Minor</option>
-              <option value="medium">Moderate</option>
-              <option value="large">Serious</option>
-              <option value="massive">Critical</option>
+              <option value="all">{t("severity.all")}</option>
+              <option value="small">{t("severity.low")}</option>
+              <option value="medium">{t("severity.medium")}</option>
+              <option value="large">{t("severity.high")}</option>
+              <option value="massive">{t("severity.critical")}</option>
             </select>
             <ChevronDown size={15} aria-hidden="true" />
           </label>
           <label className="quick-select">
-            <span className="sr-only">Status</span>
+            <span className="sr-only">{t("filters.status")}</span>
             <select
               name="statusFilter"
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value as "all" | "unresolved" | "resolved")}
-              aria-label="Filter by status"
+              aria-label={t("filters.byStatus")}
             >
-              <option value="all">All Status</option>
-              <option value="unresolved">Unresolved</option>
-              <option value="resolved">Resolved</option>
+              <option value="all">{t("status.all")}</option>
+              <option value="unresolved">{t("status.unresolved")}</option>
+              <option value="resolved">{t("status.resolved")}</option>
             </select>
             <ChevronDown size={15} aria-hidden="true" />
           </label>
         </div>
         <div className="control-actions">
           <div className="map-mode-toggle">
-            <SegmentedButton active={viewMode === "map"} onClick={() => setViewMode("map")} icon={<MapIcon size={14} />} label="Map" />
-            <SegmentedButton active={viewMode === "list"} onClick={() => setViewMode("list")} icon={<List size={14} />} label="List" />
+            <SegmentedButton active={viewMode === "map"} onClick={() => setViewMode("map")} icon={<MapIcon size={14} />} label={t("nav.map")} />
+            <SegmentedButton active={viewMode === "list"} onClick={() => setViewMode("list")} icon={<List size={14} />} label={t("nav.list")} />
           </div>
           <button
             className={clsx("filter-button", activeFilterCount > 0 && "is-active", filterPulse && "is-pulsing")}
             onClick={() => setShowFilters(true)}
             type="button"
-            aria-label="Open search and filters"
+            aria-label={t("aria.openFilters")}
           >
             <SlidersHorizontal size={14} />
-            Filter
+            {t("nav.filters")}
             {activeFilterCount > 0 && <span>{activeFilterCount}</span>}
           </button>
           {wardFilterNumber != null ? (
@@ -747,7 +882,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
               <button
                 type="button"
                 className="near-me-clear"
-                aria-label={`Clear Ward ${wardFilterNumber} filter`}
+                aria-label={t("aria.clearWard", { ward: wardFilterNumber })}
                 onClick={(event) => {
                   event.stopPropagation();
                   setWardFilterNumber(null);
@@ -762,10 +897,10 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
               className={clsx("chip-button", wardFilterState === "locating" && "is-active")}
               onClick={detectAndFilterMyWard}
               type="button"
-              aria-label="Filter reports near my current location"
+              aria-label={t("aria.nearMe")}
             >
               {wardFilterState === "locating" ? <LoaderCircle className="spin" size={14} /> : <Layers size={14} />}
-              Near Me
+              {t("nav.nearMe")}
             </button>
           )}
         </div>
@@ -777,7 +912,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
             <div className="notice amber offline-status" role="status">
               <CircleAlert size={16} />
               <span>
-                <strong>You are offline</strong>
+                <strong>{t("offline.notice")}</strong>
                 Cached reports are still available, but submitting may fail.
               </span>
             </div>
@@ -786,7 +921,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
             <div className="notice amber" role="alert">
               <CircleAlert size={16} />
               <span>
-                <strong>Location not detected</strong>
+                <strong>{t("error.locationNotFound")}</strong>
                 Choose filters manually or try again when GPS is available.
               </span>
             </div>
@@ -795,16 +930,18 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
             <div className="notice amber control-error-action" role="alert">
               <CircleAlert size={16} />
               <span>
-                <strong>Refresh failed</strong>
+                <strong>{t("error.refreshFailed")}</strong>
                 {refreshError}
               </span>
               <button type="button" onClick={() => void refreshReports()}>
-                Retry
+                {t("action.retry")}
               </button>
             </div>
           )}
         </div>
       )}
+
+      {viewMode === "map" && freshnessNote}
 
       {showFilters && (
         <FilterSheet
@@ -862,30 +999,32 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
               <input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search ward, address, landmark"
-                aria-label="Search reports"
+                placeholder={t("nav.searchPlaceholder")}
+                aria-label={t("aria.searchReports")}
               />
             </label>
             <select
               value={sortBy}
               onChange={(event) => setSortBy(event.target.value as "newest" | "upvotes" | "oldest")}
-              aria-label="Sort reports"
+              aria-label={t("aria.sortReports")}
             >
-              <option value="newest">Sort: Newest</option>
-              <option value="upvotes">Sort: Most Upvoted</option>
-              <option value="oldest">Sort: Oldest</option>
+              <option value="newest">{t("list.sortNewest")}</option>
+              <option value="upvotes">{t("list.sortUpvoted")}</option>
+              <option value="oldest">{t("list.sortOldest")}</option>
             </select>
             <div className="list-stats-row" aria-label="Report statistics">
               <span className="list-stat list-stat-red">
-                <strong>{unresolved.length}</strong> active
+                <strong>{unresolved.length}</strong> {t("stats.active").toLowerCase()}
               </span>
               <span className="list-stat list-stat-green">
-                <strong>{resolved.length}</strong> resolved
+                <strong>{resolved.length}</strong> {t("stats.cleaned").toLowerCase()}
               </span>
             </div>
           </div>
+          {freshnessNote}
           <ReportList
             reports={visibleReports}
+            resetKey={`main:${sortBy}`}
             totalReports={reports.length}
             wards={data.wards}
             representatives={data.representatives}
@@ -899,9 +1038,9 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
 
       {viewMode === "list" && (
         <section className="stats-strip" aria-label="Amma Odisha report statistics">
-          <Stat label="Active" value={unresolved.length} tone="red" />
-          <Stat label="Resolved" value={resolved.length} tone="green" />
-          <Stat label="Total" value={reports.length} tone="gray" />
+          <Stat label={t("stats.active")} value={unresolved.length} tone="red" />
+          <Stat label={t("stats.cleaned")} value={resolved.length} tone="green" />
+          <Stat label={t("stats.total")} value={reports.length} tone="gray" />
         </section>
       )}
 
@@ -910,25 +1049,25 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
           className="report-cta-button"
           type="button"
           onClick={() => setShowReportForm(true)}
-          aria-label="Report a garbage dump"
+          aria-label={t("aria.reportCta")}
         >
           <Camera size={17} />
-          Report Garbage
+          {t("action.reportGarbage")}
         </button>
         <button
           className="scan-qr-cta-button"
           type="button"
           onClick={() => setShowMobileQR(true)}
-          aria-label="Scan QR to report on mobile"
+          aria-label={t("aria.scanQr")}
         >
           <Smartphone size={17} />
-          Scan QR to Report
+          {t("aria.scanQr")}
         </button>
         <button className="insights-button" type="button" onClick={() => setShowInsights(true)} aria-label="Open Amma Odisha insights">
           <BarChart3 size={18} />
           <span>
             <strong>{visibleReports.length}</strong>
-            <small>Insights</small>
+            <small>{t("nav.insights")}</small>
           </span>
         </button>
       </footer>
@@ -950,6 +1089,9 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
             dismissIntro();
             setShowReportForm(true);
           }}
+          wardCount={introStats.wardCount}
+          mlaCount={introStats.mlaCount}
+          mpCount={introStats.mpCount}
         />
       )}
       {showAbout && <AboutSheet onClose={() => setShowAbout(false)} onOpenChangelog={() => { setShowAbout(false); setShowChangelog(true); }} />}
@@ -959,6 +1101,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
           reports={reports}
           visibleReports={visibleReports}
           filteredWardNumber={filteredWard?.ward_number ?? null}
+          hasActiveFilters={hasActiveFilters}
           unresolvedCount={unresolved.length}
           resolvedCount={resolved.length}
           worstWards={worstWards}
@@ -976,11 +1119,35 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
         />
       )}
       {showMobileQR && <MobileQRModal url={`${window.location.origin}/?action=report`} onClose={() => setShowMobileQR(false)} />}
-      {!showIntro && !showReportForm && !selectedReport && !selectedProfile && !showInsights && (
+      {!showIntro && !showReportForm && !selectedReport && !selectedProfile && !showInsights && !showMobileQR && !showAbout && !showChangelog && !showFilters && !showMyReports && (
         <TelegramToast trigger={hasInteracted} />
       )}
-      {showReportForm && <ReportForm data={data} onClose={() => setShowReportForm(false)} onSubmit={onSubmitted} />}
-      {selectedReport && (
+      {showReportForm && (
+        <ReportForm
+          data={data}
+          reports={reports}
+          onClose={() => setShowReportForm(false)}
+          onSubmit={onSubmitted}
+          onViewReport={(report) => {
+            setShowReportForm(false);
+            handleMapReportSelect(report);
+          }}
+        />
+      )}
+      {showMyReports && (
+        <MyReportsSheet
+          reports={reports}
+          reportsUnavailable={Boolean(refreshError)}
+          onRetry={() => void refreshReports()}
+          navigate={navigate}
+          onClose={() => setShowMyReports(false)}
+          onSelectReport={(report) => {
+            setShowMyReports(false);
+            handleMapReportSelect(report);
+          }}
+        />
+      )}
+      {selectedReport ? (
         <ReportDetail
           report={selectedReport}
           data={data}
@@ -1012,7 +1179,30 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
             navigate(getRouteSelectionPath(profile), { returnReportId: selectedReport.id });
           }}
         />
-      )}
+      ) : routeSelection?.type === "report" ? (
+        routeReportLoading ? (
+          <DialogSurface ariaLabel="Loading report" className="mini-card" onClose={() => navigate("/")}>
+            <button className="close-button" onClick={() => navigate("/")} aria-label="Close report detail">
+              <X size={18} />
+            </button>
+            <h2>Loading report…</h2>
+            <div className="loading-progress" aria-hidden="true" />
+          </DialogSurface>
+        ) : (
+          <DialogSurface ariaLabel="Report unavailable" className="mini-card" onClose={() => navigate("/")}>
+            <button className="close-button" onClick={() => navigate("/")} aria-label="Close report detail">
+              <X size={18} />
+            </button>
+            <h2>Report unavailable</h2>
+            <p>This report may have been removed or the link may be outdated.</p>
+            <div className="preview-actions">
+              <button className="primary-cta" type="button" onClick={() => navigate("/")}>
+                Back to map
+              </button>
+            </div>
+          </DialogSurface>
+        )
+      ) : null}
       {selectedProfile && (
         <ProfileSheet
           selection={selectedProfile}
@@ -1050,7 +1240,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
 
 function SegmentedButton({ active, icon, label, onClick }: { active: boolean; icon: ReactNode; label: string; onClick: () => void }) {
   return (
-    <button className={clsx("segmented-button", active && "is-active")} onClick={onClick} type="button">
+    <button className={clsx("segmented-button", active && "is-active")} onClick={onClick} type="button" aria-pressed={active}>
       {icon}
       {label}
     </button>
@@ -1107,14 +1297,22 @@ function FilterSheet({
   wardFilterNumber: number | null;
   wardFilterState: "idle" | "locating" | "error";
 }) {
+  const severityOptions: { key: "all" | SeverityKey; label: string }[] = [
+    { key: "all", label: t("severity.all") },
+    { key: "small", label: `${t("severity.low")} (<1m²)` },
+    { key: "medium", label: `${t("severity.medium")} (1-5m²)` },
+    { key: "large", label: `${t("severity.high")} (5-20m²)` },
+    { key: "massive", label: `${t("severity.critical")} (20m²+)` }
+  ];
+
   return (
-    <DialogSurface ariaLabel="Search and filter reports" className="filter-sheet" onClose={onClose}>
+    <DialogSurface ariaLabel={t("filters.dialogLabel")} className="filter-sheet" onClose={onClose}>
       <button className="close-button" onClick={onClose} aria-label="Close filters">
         <X size={18} />
       </button>
       <div className="sheet-title-row">
         <div>
-          <p className="eyebrow">Search & Filter</p>
+          <p className="eyebrow">{t("filters.title")}</p>
           <h2>Find reports faster</h2>
         </div>
         <SlidersHorizontal size={20} />
@@ -1134,23 +1332,23 @@ function FilterSheet({
         </button>
       </div>
       <label className="filter-field">
-        <span>Search</span>
+        <span>{t("filters.search")}</span>
         <div className="filter-search">
           <Search size={15} />
           <input
-            autoFocus
+            data-autofocus="true"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Address, ward, or landmark"
-            aria-label="Search reports"
+            placeholder={t("filters.searchPlaceholder")}
+            aria-label={t("aria.searchReports")}
           />
         </div>
       </label>
       <div className="filter-grid">
         <label className="filter-field">
-          <span>Severity</span>
-          <select value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value as "all" | SeverityKey)} aria-label="Filter by severity">
-            {SEVERITY_FILTER_OPTIONS.map((option) => (
+          <span>{t("filters.severity")}</span>
+          <select value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value as "all" | SeverityKey)} aria-label={t("filters.bySeverity")}>
+            {severityOptions.map((option) => (
               <option value={option.key} key={option.key}>
                 {option.label}
               </option>
@@ -1158,19 +1356,19 @@ function FilterSheet({
           </select>
         </label>
         <label className="filter-field">
-          <span>Status</span>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | "unresolved" | "resolved")} aria-label="Filter by status">
-            <option value="all">All status</option>
-            <option value="unresolved">Unresolved / Active</option>
-            <option value="resolved">Cleaned / Resolved</option>
+          <span>{t("filters.status")}</span>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | "unresolved" | "resolved")} aria-label={t("filters.byStatus")}>
+            <option value="all">{t("status.all")}</option>
+            <option value="unresolved">{t("filter.statusActive")}</option>
+            <option value="resolved">{t("filter.statusCleaned")}</option>
           </select>
         </label>
         <label className="filter-field">
           <span>Sort</span>
-          <select value={sortBy} onChange={(event) => setSortBy(event.target.value as "newest" | "upvotes" | "oldest")} aria-label="Sort reports">
-            <option value="newest">Newest</option>
-            <option value="upvotes">Most Upvoted</option>
-            <option value="oldest">Oldest</option>
+          <select value={sortBy} onChange={(event) => setSortBy(event.target.value as "newest" | "upvotes" | "oldest")} aria-label={t("aria.sortReports")}>
+            <option value="newest">{t("list.sortNewest")}</option>
+            <option value="upvotes">{t("list.sortUpvoted")}</option>
+            <option value="oldest">{t("list.sortOldest")}</option>
           </select>
         </label>
       </div>
@@ -1191,14 +1389,14 @@ function FilterSheet({
       <div className="filter-actions">
         <button type="button" className="secondary-cta" onClick={clearFilters} disabled={activeFilterCount === 0 && sortBy === "newest"}>
           <X size={14} />
-          Clear
+          {t("filters.clear")}
         </button>
         <button type="button" className="secondary-cta" onClick={() => void onRefresh()} disabled={refreshing}>
           {refreshing ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
           Refresh
         </button>
         <button type="button" className="primary-cta" onClick={onApply}>
-          Apply
+          {t("filters.apply")}
         </button>
       </div>
     </DialogSurface>
@@ -1209,6 +1407,7 @@ function InsightsSheet({
   reports,
   visibleReports,
   filteredWardNumber,
+  hasActiveFilters,
   unresolvedCount,
   resolvedCount,
   worstWards,
@@ -1219,6 +1418,7 @@ function InsightsSheet({
   reports: GarbageReport[];
   visibleReports: GarbageReport[];
   filteredWardNumber: number | null;
+  hasActiveFilters: boolean;
   unresolvedCount: number;
   resolvedCount: number;
   worstWards: ReturnType<typeof getWorstWards>;
@@ -1227,7 +1427,7 @@ function InsightsSheet({
   onOpenWard: (wardNumber: number) => void;
 }) {
   const activeShare = Math.round((unresolvedCount / Math.max(1, reports.length)) * 100);
-  const priorityReports = useMemo(() => {
+  const priorityQueue = useMemo(() => {
     return visibleReports
       .filter((report) => report.status !== "resolved")
       .sort((a, b) => {
@@ -1236,9 +1436,10 @@ function InsightsSheet({
         const upvoteDelta = (b.upvote_count ?? 0) - (a.upvote_count ?? 0);
         if (upvoteDelta !== 0) return upvoteDelta;
         return daysActive(b.created_at) - daysActive(a.created_at);
-      })
-      .slice(0, 4);
+      });
   }, [visibleReports]);
+  const priorityReports = priorityQueue.slice(0, 4);
+  const scopeSuffix = hasActiveFilters ? " in current view" : "";
 
   return (
     <DialogSurface ariaLabel="Amma Odisha insights" className="insights-sheet" onClose={onClose}>
@@ -1252,7 +1453,7 @@ function InsightsSheet({
         <div className="sheet-title-row">
           <div>
             <p className="eyebrow">Public Accountability</p>
-            <h2>Citywide report pulse</h2>
+            <h2>{t("insights.title")}</h2>
           </div>
           <Trophy size={20} />
         </div>
@@ -1273,8 +1474,8 @@ function InsightsSheet({
 
         <div className="priority-queue">
           <div className="sheet-title-row compact">
-            <h3>Priority Queue</h3>
-            <span className="pill red">{priorityReports.length} active</span>
+            <h3>Priority Queue{scopeSuffix}</h3>
+            <span className="pill red">{priorityQueue.length} active</span>
           </div>
           {priorityReports.length ? (
             priorityReports.map((report) => {
@@ -1293,11 +1494,11 @@ function InsightsSheet({
                   <span className="priority-report-main">
                     <strong>{report.address}</strong>
                     <small>
-                      Ward {report.ward_number} - {severity.label} - {daysActive(report.created_at)} days open
+                      Ward {report.ward_number} - {severityLabel(report.severity)} - {daysActive(report.created_at)} days open
                     </small>
                   </span>
                   <span className="priority-report-score">
-                    <strong>{report.upvote_count ?? 1}</strong>
+                    <strong>{report.upvote_count ?? 0}</strong>
                     <small>upvotes</small>
                   </span>
                 </button>
@@ -1310,7 +1511,7 @@ function InsightsSheet({
 
         <div className="leaderboard">
           <div className="sheet-title-row compact">
-            <h3>Worst Wards by Active Reports</h3>
+            <h3>Worst Wards by Active Reports{scopeSuffix}</h3>
             <span className="pill red">{worstWards.length} wards</span>
           </div>
           {worstWards.length ? (
@@ -1348,7 +1549,16 @@ function InsightsSheet({
   );
 }
 
-function IntroOverlay({ onClose, onStartReport }: { onClose: () => void; onStartReport: () => void }) {
+function IntroOverlay({ mlaCount, mpCount, onClose, onStartReport, wardCount }: { mlaCount: number; mpCount: number; onClose: () => void; onStartReport: () => void; wardCount: number }) {
+  const statsLabel = [
+    wardCount > 0 ? `${wardCount} wards` : "",
+    mlaCount > 0 ? `${mlaCount} MLA${mlaCount === 1 ? "" : "s"}` : "",
+    mpCount > 0 ? `${mpCount} MP${mpCount === 1 ? "" : "s"}` : "",
+    "All of Bhubaneswar"
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <DialogSurface layerClassName="intro-nudge" className="intro-card" ariaLabel="Amma Odisha intro" onClose={onClose}>
       <button className="toast-close" onClick={onClose} aria-label="Dismiss intro">
@@ -1358,10 +1568,10 @@ function IntroOverlay({ onClose, onStartReport }: { onClose: () => void; onStart
       <div className="intro-card-body">
         <img src="/logo.png" alt="" />
         <p className="eyebrow">Bhubaneswar (BMC)</p>
-        <h2>Report garbage. Hold your ward accountable.</h2>
+        <h2>{t("appTagline")}</h2>
         <p>Every garbage dump is mapped, photographed, and linked to the responsible ward, MLA, and MP.</p>
         <p className="intro-action-copy">Tap a red dot on the map to see a report, or start a new one.</p>
-        <b>67 wards · 4 MLAs · 1 MP · All of Bhubaneswar</b>
+        <b>{statsLabel}</b>
         <button className="primary-cta intro-report-cta" onClick={onStartReport} aria-label="Report a garbage dump near you">
           <Plus size={16} />
           Report garbage near me
@@ -1385,7 +1595,7 @@ function IntroHeroImage() {
     );
   }
 
-  return <img className="intro-hero-image" src="/garbage-hero.png" alt="Garbage on streets of Bhubaneswar" onError={() => setFailed(true)} />;
+  return <img className="intro-hero-image" src="/garbage-hero.jpg" alt="Garbage on streets of Bhubaneswar" onError={() => setFailed(true)} />;
 }
 
 function ReportList({
@@ -1396,6 +1606,7 @@ function ReportList({
   onClearFilters,
   refreshing = false,
   reports,
+  resetKey = "",
   totalReports = reports.length,
   wards,
   representatives,
@@ -1408,6 +1619,7 @@ function ReportList({
   onClearFilters?: () => void;
   refreshing?: boolean;
   reports: GarbageReport[];
+  resetKey?: string;
   totalReports?: number;
   wards: Ward[];
   representatives?: Representative[];
@@ -1427,7 +1639,7 @@ function ReportList({
 
   useEffect(() => {
     setVisibleCount(initialLimit);
-  }, [initialLimit, reports]);
+  }, [initialLimit, resetKey]);
 
   return (
     <div className="report-list" aria-busy={refreshing}>
@@ -1449,19 +1661,19 @@ function ReportList({
           })}
           {hasMore && (
             <button className="load-more-button" type="button" onClick={() => setVisibleCount((count) => count + initialLimit)}>
-              Load more reports
+              {t("action.loadMore")}
             </button>
           )}
         </>
       ) : (
         <div className="empty-state">
           <p className="empty-title">
-            {hasActiveFilters ? "No reports match your current filters." : emptyTitle ?? "No reports yet."}
+            {hasActiveFilters ? t("list.empty") : emptyTitle ?? t("myReports.empty")}
           </p>
           <p className="empty">
             {hasActiveFilters
               ? `Try a different search, status, or ward filter. There are ${totalReports} total reports available.`
-              : emptyDescription ?? "Be the first to report a garbage dump in your area!"}
+              : emptyDescription ?? t("list.emptyArea")}
           </p>
           {hasActiveFilters && onClearFilters && (
             <button className="secondary-cta" type="button" onClick={onClearFilters}>
@@ -1502,17 +1714,21 @@ function ReportListItem({
   mla?: Representative;
   onSelect: (report: GarbageReport) => void;
 }) {
-  const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
   const wardName = getDistinctWardName(ward);
   const upvoteCount = report.upvote_count ?? 0;
-  const tagLabel = `${severity.label}, ${STATUS_LABELS[report.status]}${mla ? `, MLA: ${mla.name}` : ""}`;
+  const severityText = severityLabel(report.severity);
+  const statusText = t(report.status === "resolved" ? "status.resolvedShort" : "status.unresolvedShort");
+  const tagLabel = `${severityText}, ${statusText}${mla ? `, MLA: ${mla.name}` : ""}`;
+  const days = daysOpen(report);
+  const escLevel = escalationLevel(days);
+  const escalationText = escLevel >= 3 ? t("escalation.dotAria", { label: t(`escalation.level${escLevel}`), days }) : "";
   return (
     <button
       className="report-item"
       onClick={() => onSelect(report)}
       onFocus={() => preloadImage(report.photo_url)}
       onPointerEnter={() => preloadImage(report.photo_url)}
-      aria-label={`${wardName || report.address} — ${severity.label} garbage, ${STATUS_LABELS[report.status]}, ${upvoteCount} ${upvoteCount === 1 ? "upvote" : "upvotes"}`}
+      aria-label={`${wardName || report.address} — ${severityText} garbage, ${statusText}, ${upvoteCount} ${upvoteCount === 1 ? "upvote" : "upvotes"}${escalationText ? `, ${escalationText}` : ""}`}
     >
       <ReportPhoto
         src={report.photo_url}
@@ -1530,15 +1746,22 @@ function ReportListItem({
       <span className="report-item-body">
         <strong>{wardName || report.address}</strong>
         <small>
-          {report.address}{wardName ? ` · Ward #${report.ward_number}` : ""} · {timeAgo(report.created_at)}
+          {report.address}{wardName ? ` · Ward #${report.ward_number}` : ""} · {timeAgoI18n(report.created_at, t)}
         </small>
       </span>
       <span className="report-item-tags" aria-label={tagLabel}>
+        {escLevel >= 3 && (
+          <span className={clsx("aging-dot", escLevel >= 5 && "is-critical")} title={`${t(`escalation.level${escLevel}`)} - ${t("detail.daysOpen", { count: days })}`}>
+            <span className="sr-only">{escalationText}</span>
+          </span>
+        )}
         <em className={`severity-chip severity-${report.severity}`}>
           <SeverityMark severityKey={report.severity} />
-          {severity.label}
+          {severityText}
         </em>
-        <span className={clsx("status-chip", report.status === "resolved" ? "is-resolved" : "is-open")}>{STATUS_LABELS[report.status]}</span>
+        <span className={clsx("status-chip", report.status === "resolved" ? "is-resolved" : "is-open")}>
+          {statusText}
+        </span>
       </span>
       <ChevronDown size={14} className="sideways" aria-hidden="true" />
     </button>
@@ -1654,22 +1877,33 @@ function ReportDetail({
   const [upvoted, setUpvoted] = useState(() => hasUpvoted(report.id));
   const [upvoteBump, setUpvoteBump] = useState(false);
   const [alreadyVotedNote, setAlreadyVotedNote] = useState(false);
+  const [upvoteFailedNote, setUpvoteFailedNote] = useState(false);
   const [showResolve, setShowResolve] = useState(false);
+  const [shareNote, setShareNote] = useState<"idle" | "copied" | "error">("idle");
   const [compareValue, setCompareValue] = useState(50);
   const [externalPreview, setExternalPreview] = useState<ExternalPreviewConfig | null>(null);
   const compareRef = useRef<HTMLElement | null>(null);
   const alreadyVotedTimerRef = useRef<number | null>(null);
+  const upvoteFailedTimerRef = useRef<number | null>(null);
+  const shareNoteTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     setUpvoted(hasUpvoted(report.id));
     setIsUpvoting(false);
     setUpvoteBump(false);
     setAlreadyVotedNote(false);
+    setUpvoteFailedNote(false);
+    setShowResolve(false);
+    setShareNote("idle");
+    setCompareValue(50);
+    setExternalPreview(null);
   }, [report.id]);
 
   useEffect(() => {
     return () => {
       if (alreadyVotedTimerRef.current != null) window.clearTimeout(alreadyVotedTimerRef.current);
+      if (upvoteFailedTimerRef.current != null) window.clearTimeout(upvoteFailedTimerRef.current);
+      if (shareNoteTimerRef.current != null) window.clearTimeout(shareNoteTimerRef.current);
     };
   }, []);
 
@@ -1685,6 +1919,8 @@ function ReportDetail({
   const mp = data.representatives.find((rep) => rep.role === "mp" && rep.constituency === ward?.parliamentary_constituency);
   const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
   const canCompareResolvedPhotos = Boolean(report.photo_url && report.resolved_photo_url);
+  const days = daysOpen(report);
+  const escLevel = escalationLevel(days);
 
   const upvote = async () => {
     if (isUpvoting || upvoted) return;
@@ -1704,6 +1940,9 @@ function ReportDetail({
       }
     } catch (error) {
       console.error("Upvote failed", error);
+      setUpvoteFailedNote(true);
+      if (upvoteFailedTimerRef.current != null) window.clearTimeout(upvoteFailedTimerRef.current);
+      upvoteFailedTimerRef.current = window.setTimeout(() => setUpvoteFailedNote(false), 3500);
     } finally {
       setIsUpvoting(false);
     }
@@ -1713,10 +1952,16 @@ function ReportDetail({
     const url = `${location.origin}/report/${report.id}`;
     const text = getReportShareText(report, ward, mla);
     try {
-      await shareOrCopy({ title: `Garbage Report — ${ward?.ward_name ?? "Bhubaneswar"}`, text, url }, url);
+      const result = await shareOrCopy({ title: `Garbage Report — ${ward?.ward_name ?? "Bhubaneswar"}`, text, url }, url);
+      if (result === "copied") {
+        setShareNote("copied");
+        if (shareNoteTimerRef.current != null) window.clearTimeout(shareNoteTimerRef.current);
+        shareNoteTimerRef.current = window.setTimeout(() => setShareNote("idle"), 2000);
+      }
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") return;
       console.error("Share failed", caught);
+      setShareNote("error");
     }
   };
 
@@ -1732,6 +1977,7 @@ function ReportDetail({
       lng: report.longitude
     });
     setExternalPreview({
+      action: { kind: "whatsapp", value: text },
       confirmLabel: "Open WhatsApp",
       details: text,
       helper: "This opens WhatsApp with a ready-to-send message. You can review or edit it before sending.",
@@ -1741,6 +1987,7 @@ function ReportDetail({
 
   const prepareDirections = () => {
     setExternalPreview({
+      action: { kind: "maps", value: `${report.latitude},${report.longitude}` },
       confirmLabel: "Open Maps",
       details: `${report.address}\nWard ${report.ward_number}\n${report.latitude}, ${report.longitude}`,
       helper: "This opens Google Maps in a new tab so you can navigate to the reported spot.",
@@ -1750,6 +1997,7 @@ function ReportDetail({
 
   const prepareCall = (label: string, value: string) => {
     setExternalPreview({
+      action: { kind: "tel", value },
       confirmLabel: "Call now",
       details: value,
       helper: `This will start a phone call to ${label}.`,
@@ -1759,12 +2007,12 @@ function ReportDetail({
 
   const confirmExternalAction = () => {
     if (!externalPreview) return;
-    if (externalPreview.confirmLabel === "Open WhatsApp") {
-      window.open(getWhatsAppUrl(externalPreview.details), "_blank", "noopener,noreferrer");
-    } else if (externalPreview.confirmLabel === "Open Maps") {
-      window.open(`https://www.google.com/maps?q=${report.latitude},${report.longitude}`, "_blank", "noopener,noreferrer");
+    if (externalPreview.action.kind === "whatsapp") {
+      window.open(getWhatsAppUrl(externalPreview.action.value), "_blank", "noopener,noreferrer");
+    } else if (externalPreview.action.kind === "maps") {
+      window.open(`https://www.google.com/maps?q=${externalPreview.action.value}`, "_blank", "noopener,noreferrer");
     } else {
-      window.location.href = `tel:${externalPreview.details}`;
+      window.location.href = `tel:${externalPreview.action.value}`;
     }
     setExternalPreview(null);
   };
@@ -1788,17 +2036,34 @@ function ReportDetail({
               </button>
             )}
             <div className="detail-header-chips">
-              <span className="pill" style={{ background: `${severity.color}15`, color: severity.color }}>
+              <span className="pill" style={{ background: `${severity.color}15`, color: SEVERITY_TEXT_COLORS[report.severity] }}>
                 <SeverityMark severityKey={report.severity} />
-                {severity.label}
+                {severityLabel(report.severity)}
               </span>
               <span className={clsx("pill", report.status === "resolved" ? "green" : "red")}>
-                {STATUS_LABELS[report.status]}
+                {t(report.status === "resolved" ? "status.resolved" : "status.unresolved")}
               </span>
+              {escLevel >= 1 && (
+                <span
+                  className={clsx("pill", escLevel >= 5 ? "red" : escLevel >= 3 ? "orange" : "amber")}
+                  title={t("detail.daysOpen", { count: days })}
+                >
+                  <span aria-hidden="true" className="escalation-dot" />
+                  {t(`escalation.level${escLevel}`)} - {t("detail.daysOpen", { count: days })}
+                </span>
+              )}
             </div>
           </div>
           <div className="detail-header-actions">
-            <button className="detail-icon-btn" onClick={() => void shareReport()} aria-label="Share report">
+            <button
+              className="detail-icon-btn whatsapp-share-btn"
+              onClick={() => shareReportViaWhatsApp(report, `${window.location.origin}/report/${report.id}`)}
+              aria-label={t("action.shareWhatsApp")}
+              title={t("action.shareWhatsApp")}
+            >
+              <MessageCircle size={17} />
+            </button>
+            <button className="detail-icon-btn" onClick={() => void shareReport()} aria-label={t("aria.shareReport")}>
               <Share2 size={17} />
             </button>
             <button className="detail-icon-btn" onClick={onClose} aria-label="Close report detail">
@@ -1829,17 +2094,51 @@ function ReportDetail({
             className={clsx("detail-upvote-overlay", upvoted && "is-upvoted", upvoteBump && "is-bumped")}
             onClick={() => void upvote()}
             disabled={upvoted || isUpvoting}
-            aria-label={upvoted ? "Already upvoted" : "Upvote this report"}
+            aria-label={t("aria.seenThis")}
           >
             {isUpvoting ? <LoaderCircle className="spin" size={14} /> : <ThumbsUp size={14} />}
-            {upvoted ? "Seen!" : "I've seen this"}
+            {t("action.confirmSeen")}
           </button>
+        </div>
+
+        {/* ── Trust block: verification, absolute dates, cleaner & photo credit ── */}
+        <div className="detail-trust-block">
+          {report.moderation_status === "approved" && (
+            <span className="pill green trust-verified-chip">
+              <ShieldCheck size={12} />
+              {t("detail.verified")}
+            </span>
+          )}
+          <p className="trust-dates">
+            {t("detail.reportedOn", { date: shortDate(report.created_at) })}
+            {report.status === "resolved" && report.resolved_at && (
+              <> · {t("detail.cleanedOn", { date: shortDate(report.resolved_at) })}</>
+            )}
+          </p>
+          {(report.resolved_by_name || report.photo_credit || report.photo_source_url) && (
+            <p className="trust-meta">
+              {report.resolved_by_name && <span>{t("detail.cleanedBy", { name: report.resolved_by_name })}</span>}
+              {(report.photo_credit || report.photo_source_url) && (
+                <small className="trust-photo-credit">
+                  {report.photo_credit ? t("detail.photoCredit", { credit: report.photo_credit }) : null}
+                  {report.photo_source_url && (
+                    <>
+                      {report.photo_credit ? " · " : ""}
+                      <a href={report.photo_source_url} target="_blank" rel="noreferrer">
+                        {report.photo_source_title || report.photo_source_url}
+                      </a>
+                    </>
+                  )}
+                </small>
+              )}
+            </p>
+          )}
         </div>
 
         {/* ── Stats strip ── */}
         <div className="detail-stats-row">
           <div className="detail-stat">
-            <strong style={{ color: severity.color }}>{report.upvote_count || 1}</strong>
+            <strong style={{ color: severity.color }}>{report.upvote_count ?? 0}</strong>
             <span>Reports</span>
           </div>
           <div className="detail-stat-divider" aria-hidden="true" />
@@ -1859,6 +2158,21 @@ function ReportDetail({
           {alreadyVotedNote && (
             <p className="already-voted-note" role="status">
               You already supported this report from another device.
+            </p>
+          )}
+          {upvoteFailedNote && (
+            <p className="already-voted-note" role="alert">
+              Your vote could not be recorded. Check your connection and try again.
+            </p>
+          )}
+          {shareNote === "copied" && (
+            <p className="already-voted-note" role="status">
+              Copied to clipboard.
+            </p>
+          )}
+          {shareNote === "error" && (
+            <p className="warning-text" role="alert">
+              Sharing failed. Check your connection and try again.
             </p>
           )}
           {report.moderation_status === "flagged" && (
@@ -1906,6 +2220,8 @@ function ReportDetail({
                     max="85"
                     value={compareValue}
                     onChange={(event) => setCompareValue(Number(event.target.value))}
+                    aria-valuetext={`${compareValue}% cleaned`}
+                    aria-label="Before and after cleanup comparison"
                   />
                 </label>
               </section>
@@ -1921,7 +2237,7 @@ function ReportDetail({
           <div className="detail-actions">
             <button className="directions-link" onClick={prepareDirections}>
               <ArrowUpRight size={15} />
-              Get directions
+              {t("action.directions")}
             </button>
             <div className="contact-panel">
               <div className="contact-heading">
@@ -1936,7 +2252,7 @@ function ReportDetail({
                 </button>
                 <button onClick={() => prepareCall("BMC", BMC_NUMBER)}>
                   <Phone size={16} />
-                  Call BMC
+                  {t("action.callBmc")}
                 </button>
                 <button onClick={() => prepareCall("Helpline 1929", BMC_HELPLINE)}>
                   <Phone size={16} />
@@ -1961,10 +2277,7 @@ function ReportDetail({
       {showResolve && <ResolveModal report={report} onClose={() => setShowResolve(false)} onResolved={onUpdate} />}
       {externalPreview && (
         <ExternalAppPreview
-          confirmLabel={externalPreview.confirmLabel}
-          details={externalPreview.details}
-          helper={externalPreview.helper}
-          title={externalPreview.title}
+          config={externalPreview}
           onClose={() => setExternalPreview(null)}
           onConfirm={confirmExternalAction}
         />
@@ -2023,6 +2336,12 @@ function getPartyColor(party?: string): string {
   return PARTY_COLORS[party.toUpperCase()] ?? "var(--text-faint)";
 }
 
+/** Contrast-safe dark variant of the party color for text on light surfaces. */
+function getPartyTextColor(party?: string): string {
+  const key = party?.toUpperCase() ?? "";
+  return PARTY_TEXT_COLORS[key] ?? getPartyColor(party);
+}
+
 function Avatar({ rep }: { rep?: Representative }) {
   if (rep?.photo_url) return <img className="avatar" src={rep.photo_url} alt={rep.name} />;
   const initials = (rep?.name ?? "NK")
@@ -2042,6 +2361,7 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
   const [status, setStatus] = useState<ResolveStatus>("locating");
   const [verifiedPosition, setVerifiedPosition] = useState<{ lat: number; lng: number; distanceMeters: number } | null>(null);
   const [failedDistance, setFailedDistance] = useState<number | null>(null);
+  const [geoFailure, setGeoFailure] = useState<"denied" | "timeout" | "unavailable" | null>(null);
   const [saveError, setSaveError] = useState("");
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
@@ -2057,6 +2377,7 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
   const checkProximity = useCallback(() => {
     setSaveError("");
     setVerifiedPosition(null);
+    setGeoFailure(null);
 
     if (!navigator.geolocation) {
       setStatus("mismatch");
@@ -2068,7 +2389,8 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
       (position) => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
-        const distanceMeters = Math.hypot((lat - report.latitude) * 111_000, (lng - report.longitude) * 111_000);
+        const distanceMeters =
+          distanceKm({ latitude: lat, longitude: lng }, { latitude: report.latitude, longitude: report.longitude }) * 1000;
         setFailedDistance(distanceMeters);
         if (distanceMeters > 500) {
           setStatus("mismatch");
@@ -2077,7 +2399,12 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
         setVerifiedPosition({ lat, lng, distanceMeters });
         setStatus("verified");
       },
-      () => setStatus("mismatch"),
+      (geoError) => {
+        if (geoError.code === geoError.PERMISSION_DENIED) setGeoFailure("denied");
+        else if (geoError.code === geoError.TIMEOUT) setGeoFailure("timeout");
+        else setGeoFailure("unavailable");
+        setStatus("mismatch");
+      },
       { enableHighAccuracy: true, timeout: 8000 }
     );
   }, [report.latitude, report.longitude]);
@@ -2087,24 +2414,24 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
     didCheckLocationRef.current = true;
     checkProximity();
   }, [checkProximity]);
-
-  const saveVerification = async () => {
+  const saveVerification = async (allowUnverified = false) => {
     setSaveError("");
 
-    if (!verifiedPosition) {
+    if (!verifiedPosition && !allowUnverified) {
       checkProximity();
       return;
     }
+    if (!photo) return;
 
     setStatus("saving");
-    setUploadProgress(photo ? 0 : null);
+    setUploadProgress(0);
     try {
-      const upload = photo ? await backend.uploadReportPhoto(photo, { onProgress: setUploadProgress }) : null;
+      const upload = await backend.uploadReportPhoto(photo, { onProgress: setUploadProgress });
       const delta = await backend.resolveReport(report.id, {
         photoThumbUrl: upload?.thumbUrl ?? null,
         photoUrl: upload?.url ?? null,
-        lat: verifiedPosition.lat,
-        lng: verifiedPosition.lng
+        lat: verifiedPosition?.lat ?? report.latitude,
+        lng: verifiedPosition?.lng ?? report.longitude
       });
       navigator.vibrate?.(35);
       // Spread the delta over the original full report so the UI keeps address,
@@ -2140,7 +2467,7 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
         <button className="close-button" onClick={onClose} aria-label="Close resolve modal">
           <X size={18} />
         </button>
-        <h2>Mark as Cleaned</h2>
+        <h2>{t("resolve.title")}</h2>
         <p>First confirm you are near the spot, then add the cleanup photo.</p>
         <div className={clsx("notice resolve-distance-notice", status === "verified" ? "success" : "amber")}>
           {status === "verified" ? <CheckCircle2 size={16} /> : status === "locating" ? <LoaderCircle className="spin" size={16} /> : <CircleAlert size={16} />}
@@ -2156,8 +2483,12 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
           </span>
         </div>
         <label
-          className={clsx("photo-drop", preview && "has-photo", status !== "verified" && "is-disabled")}
-          aria-disabled={status !== "verified" ? "true" : undefined}
+          className={clsx(
+            "photo-drop",
+            preview && "has-photo",
+            status !== "verified" && status !== "mismatch" && "is-disabled"
+          )}
+          aria-disabled={status !== "verified" && status !== "mismatch" ? "true" : undefined}
         >
           {preview ? <img src={preview} alt="" /> : <Camera size={28} />}
           <span>{preview ? "Change cleanup photo" : "Add cleanup photo"}</span>
@@ -2166,7 +2497,7 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
             type="file"
             accept="image/*"
             aria-label="Upload cleanup proof photo"
-            disabled={status !== "verified"}
+            disabled={status !== "verified" && status !== "mismatch"}
             onChange={(event) => onFile(event.target.files?.[0])}
           />
         </label>
@@ -2181,7 +2512,7 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
         )}
         <button className="primary-cta" onClick={() => void saveVerification()} disabled={isBusy || !canSave}>
           {isBusy ? <LoaderCircle className="spin" size={17} /> : <CheckCircle2 size={17} />}
-          {status === "verified" && "Submit cleanup proof"}
+          {status === "verified" && t("resolve.submit")}
           {status === "locating" && "Verifying your location..."}
           {status === "saving" && "Saving verification..."}
           {status === "error" && "Try saving again"}
@@ -2189,30 +2520,30 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
         </button>
         {canRetry && status !== "error" && (
           <button className="secondary-cta" type="button" onClick={checkProximity}>
-            Check distance again
+            {t("resolve.checkAgain")}
           </button>
         )}
         {status === "mismatch" && (
           <div className="resolve-fallback">
-            <p>Can't get close enough? You can still submit a cleanup photo without GPS verification. It will be flagged for manual review.</p>
+            <p>Can't get close enough? Submit your cleanup photo without GPS verification — it will be flagged for manual review.</p>
             <button
               className="secondary-cta"
               type="button"
-              onClick={() => {
-                setVerifiedPosition({
-                  lat: report.latitude,
-                  lng: report.longitude,
-                  distanceMeters: failedDistance ?? 999
-                });
-                setStatus("verified");
-              }}
+              disabled={!photo || isBusy}
+              onClick={() => void saveVerification(true)}
             >
-              Submit with photo only (unverified)
+              {photo ? "Submit with photo only (unverified)" : "Select a cleanup photo above to continue"}
             </button>
           </div>
         )}
         {status === "mismatch" && (
-          <p className="warning-text" role="alert">We could not verify that you are within 500m of this report. Move closer to the spot and try again.</p>
+          <p className="warning-text" role="alert">
+            {geoFailure === "denied"
+              ? t("resolve.denied")
+              : geoFailure === "timeout"
+                ? t("resolve.timeout")
+                : t("resolve.tooFar")}
+          </p>
         )}
         {status === "error" && saveError && (
           <p className="warning-text" role="alert">{saveError}</p>
@@ -2221,25 +2552,11 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
   );
 }
 
-function ExternalAppPreview({
-  confirmLabel,
-  details,
-  helper,
-  onClose,
-  onConfirm,
-  title
-}: {
-  confirmLabel: string;
-  details: string;
-  helper: string;
-  onClose: () => void;
-  onConfirm: () => void;
-  title: string;
-}) {
-  const isWhatsAppPreview = confirmLabel === "Open WhatsApp";
+function ExternalAppPreview({ config, onClose, onConfirm }: { config: ExternalPreviewConfig; onClose: () => void; onConfirm: () => void }) {
+  const isWhatsAppPreview = config.action.kind === "whatsapp";
 
   return (
-    <DialogSurface layerClassName="nested-modal" className="mini-card external-preview" ariaLabel={title} onClose={onClose}>
+    <DialogSurface layerClassName="nested-modal" className="mini-card external-preview" ariaLabel={config.title} onClose={onClose}>
       <button className="sheet-back-button" type="button" onClick={onClose}>
         <ChevronLeft size={16} />
         Back to report
@@ -2247,8 +2564,8 @@ function ExternalAppPreview({
       <button className="close-button" onClick={onClose} aria-label="Close WhatsApp preview">
         <X size={18} />
       </button>
-      <h2>{title}</h2>
-      <p>{helper}</p>
+      <h2>{config.title}</h2>
+      <p>{config.helper}</p>
       {isWhatsAppPreview ? (
         <div className="whatsapp-bubble-preview">
           <div className="whatsapp-bubble-header">
@@ -2256,7 +2573,7 @@ function ExternalAppPreview({
             <span className="whatsapp-sender-name">Amma Odisha -&gt; BMC</span>
           </div>
           <div className="whatsapp-bubble-body">
-            {details.split("\n").map((line, index) => (
+            {config.details.split("\n").map((line, index) => (
               line.trim() ? <p key={index}>{line}</p> : <br key={index} />
             ))}
           </div>
@@ -2265,7 +2582,7 @@ function ExternalAppPreview({
           </p>
         </div>
       ) : (
-        <pre>{details}</pre>
+        <pre>{config.details}</pre>
       )}
       <div className="preview-actions">
         <button className="secondary-cta" type="button" onClick={onClose}>
@@ -2273,7 +2590,7 @@ function ExternalAppPreview({
         </button>
         <button className="primary-cta" type="button" onClick={onConfirm}>
           <ArrowUpRight size={16} />
-          {confirmLabel}
+          {config.confirmLabel}
         </button>
       </div>
     </DialogSurface>
@@ -2282,17 +2599,117 @@ function ExternalAppPreview({
 
 function DiscardReportDialog({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
   return (
-    <DialogSurface layerClassName="nested-modal" className="mini-card discard-dialog" ariaLabel="Discard report" onClose={onCancel}>
-      <h2>Discard this report?</h2>
+    <DialogSurface layerClassName="nested-modal" className="mini-card discard-dialog" ariaLabel={t("form.discardTitle")} onClose={onCancel}>
+      <h2>{t("form.discardTitle")}</h2>
       <p>Your photo and details will be lost.</p>
       <div className="preview-actions">
         <button className="secondary-cta" type="button" onClick={onCancel}>
-          Keep editing
+          {t("form.keepEditing")}
         </button>
         <button className="primary-cta danger" type="button" onClick={onConfirm}>
-          Discard
+          {t("action.discard")}
         </button>
       </div>
+    </DialogSurface>
+  );
+}
+
+function DiscardViewDialog({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <DialogSurface layerClassName="nested-modal" className="mini-card discard-dialog" ariaLabel={t("form.discardViewTitle")} onClose={onCancel}>
+      <h2>{t("form.discardViewTitle")}</h2>
+      <p>{t("form.discardViewBody")}</p>
+      <div className="preview-actions">
+        <button className="secondary-cta" type="button" onClick={onCancel}>
+          {t("form.keepEditing")}
+        </button>
+        <button className="primary-cta danger" type="button" onClick={onConfirm}>
+          {t("action.discard")}
+        </button>
+      </div>
+    </DialogSurface>
+  );
+}
+
+type MyReportState = "cleaned" | "live" | "inReviewOrRemoved";
+
+function MyReportsSheet({ reports, reportsUnavailable = false, onRetry, navigate, onClose, onSelectReport }: { reports: GarbageReport[]; reportsUnavailable?: boolean; onRetry?: () => void | Promise<void>; navigate: (path: string) => void; onClose: () => void; onSelectReport: (report: GarbageReport) => void }) {
+  const entries = useMemo(() => getMyReports(), []);
+  const rows = useMemo(
+    () =>
+      entries.map((entry) => {
+        const report = reports.find((item) => item.id === entry.id) ?? null;
+        const state: MyReportState = !report ? "inReviewOrRemoved" : report.status === "resolved" ? "cleaned" : "live";
+        return { entry, report, state };
+      }),
+    [entries, reports]
+  );
+
+  return (
+    <DialogSurface ariaLabel={t("myReports.title")} className="profile-sheet small my-reports-sheet" onClose={onClose}>
+      <button className="close-button" onClick={onClose} aria-label={t("action.close")}>
+        <X size={18} />
+      </button>
+      <div className="sheet-title-row compact">
+        <div>
+          <p className="eyebrow">{t("myReports.description")}</p>
+          <h2>{t("myReports.title")}</h2>
+        </div>
+        <Bookmark size={20} />
+      </div>
+      {reportsUnavailable && (
+        <div className="empty-state" role="alert">
+          <p className="empty">{t("myReports.unavailable")}</p>
+          {onRetry && (
+            <button className="secondary-cta" type="button" onClick={() => void onRetry()}>
+              {t("action.retry")}
+            </button>
+          )}
+        </div>
+      )}
+      {rows.length ? (
+        <div className="my-reports-list">
+          {rows.map(({ entry, report, state }) => (
+            <div className={clsx("my-report-row", `is-${state}`)} key={entry.id}>
+              <span className="my-report-info">
+                <strong>{report?.address || entry.address || entry.title}</strong>
+                <small>
+                  {shortDate(entry.createdAt)}
+                  {entry.title ? ` · ${entry.title}` : ""}
+                </small>
+              </span>
+              <span
+                className={clsx(
+                  "status-chip",
+                  state === "cleaned" && "is-resolved",
+                  state === "live" && "is-live"
+                )}
+              >
+                {state === "cleaned" ? t("status.cleaned") : state === "live" ? t("myReports.live") : t("myReports.inReviewOrRemoved")}
+              </span>
+              {report ? (
+                <button type="button" className="tiny-action my-report-view-action" onClick={() => onSelectReport(report)}>
+                  {t("myReports.view")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="tiny-action my-report-view-action view-deep"
+                  onClick={() => navigate(`/report/${entry.id}`)}
+                  aria-label={`${t("myReports.view")}: ${entry.address || entry.title}`}
+                >
+                  {t("myReports.view")}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state">
+          <Bookmark size={22} aria-hidden="true" />
+          <p className="empty">{t("myReports.empty")}</p>
+        </div>
+      )}
     </DialogSurface>
   );
 }
@@ -2300,7 +2717,7 @@ function DiscardReportDialog({ onCancel, onConfirm }: { onCancel: () => void; on
 type ReportFormStep = 1 | 2 | 3;
 type ReportFieldKey = "photo" | "ward" | "address";
 
-function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () => void; onSubmit: (report: GarbageReport) => void }) {
+function ReportForm({ data, reports, onClose, onSubmit, onViewReport }: { data: CivicData; reports: GarbageReport[]; onClose: () => void; onSubmit: (report: GarbageReport) => void; onViewReport: (report: GarbageReport) => void }) {
   const [formStep, setFormStep] = useState<ReportFormStep>(1);
   const [wardNumber, setWardNumber] = useState("");
   const [wardSearch, setWardSearch] = useState("");
@@ -2326,6 +2743,8 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<ReportFieldKey, string>>>({});
   const [formOffline, setFormOffline] = useState(() => typeof navigator !== "undefined" && navigator.onLine === false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const [pendingViewReport, setPendingViewReport] = useState<GarbageReport | null>(null);
+  const [shareNote, setShareNote] = useState<"idle" | "copied" | "error">("idle");
   const limit = canSubmitReport();
   const selectedWard = detectedWard ?? data.wards.find((ward) => ward.ward_number === Number(wardNumber));
   const selectedWardLabel = selectedWard ? getWardSelectLabel(selectedWard) : "";
@@ -2357,18 +2776,25 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
     return matches;
   }, [data.wards, selectedWard, starterWardOptions, wardSearch]);
   const visibleWardOptions = filteredWardOptions.slice(0, 8);
+  // Duplicate check: active reports within 100m of the user-provided GPS coords (review step only).
+  const nearbyDuplicates = useMemo(() => {
+    if (formStep !== 3 || !reports.length || !location) return [];
+    return findNearbyReports(reports, location.lat, location.lng, 100)
+      .map((match: NearbyMatch) => ({ match, report: reports.find((item) => item.id === match.report.id) }))
+      .filter((item): item is { match: NearbyMatch; report: GarbageReport } => Boolean(item.report));
+  }, [formStep, location, reports]);
   const progressLabel =
     formStep === 1
-      ? "Choose area"
+      ? t("form.chooseArea")
       : formStep === 2
-        ? "Add evidence"
-        : "Review and submit";
+        ? t("form.addEvidence")
+        : t("form.reviewSubmit");
   const currentStepTitle =
     formStep === 1
-      ? "Where is the garbage?"
+      ? t("form.step1Title")
       : formStep === 2
-        ? "Add photo and landmark"
-        : "Review report";
+        ? t("form.step2Title")
+        : t("form.step3Title");
   const hasUnsavedInput =
     Boolean(wardNumber || detectedWard || location || address.trim() || photo) || severity !== "medium" || category !== "mixed";
 
@@ -2377,9 +2803,11 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
   const photoPreviewRef = useRef<string | null>(null);
   const wardSearchRef = useRef<HTMLInputElement | null>(null);
   const successRef = useRef<HTMLDivElement | null>(null);
+  const shareNoteTimerRef = useRef<number | null>(null);
   useEffect(() => {
     return () => {
       if (photoPreviewRef.current) URL.revokeObjectURL(photoPreviewRef.current);
+      if (shareNoteTimerRef.current != null) window.clearTimeout(shareNoteTimerRef.current);
     };
   }, []);
 
@@ -2415,6 +2843,16 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
     };
   }, []);
 
+  useEffect(() => {
+    if (!submitting) return;
+    const warnUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnUnload);
+    return () => window.removeEventListener("beforeunload", warnUnload);
+  }, [submitting]);
+
   const guideToWardSearch = useCallback(() => {
     window.setTimeout(() => wardSearchRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 200);
     window.setTimeout(() => wardSearchRef.current?.focus({ preventScroll: true }), 350);
@@ -2439,12 +2877,19 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
     try {
       if (navigator.share) {
         await navigator.share({ title: "Amma Odisha", text, url });
+        setShareNote("idle");
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        setShareNote("copied");
+        if (shareNoteTimerRef.current != null) window.clearTimeout(shareNoteTimerRef.current);
+        shareNoteTimerRef.current = window.setTimeout(() => setShareNote("idle"), 2000);
       } else {
-        await navigator.clipboard?.writeText(text);
+        throw new Error("Clipboard unavailable");
       }
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") return;
       console.error("Share failed", caught);
+      setShareNote("error");
     }
   }, [selectedWard, submittedReport]);
 
@@ -2456,6 +2901,10 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
     }
     setShowDiscardConfirm(true);
   }, [hasUnsavedInput, onClose, submitSuccess, submitting]);
+
+  const requestViewReport = (report: GarbageReport) => {
+    setPendingViewReport(report);
+  };
 
   const announce = useCallback((message: string) => {
     setLiveMessage("");
@@ -2473,6 +2922,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
 
   const chooseWard = (ward: Ward) => {
     setDetectedWard(null);
+    setLocation(null);
     setWardNumber(String(ward.ward_number));
     setWardSearch(getWardSelectLabel(ward));
     setWardPickerOpen(false);
@@ -2504,6 +2954,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
         chooseWard(activeWard);
       }
     } else if (event.key === "Escape") {
+      event.stopPropagation();
       setWardPickerOpen(false);
       setActiveWardIndex(-1);
     }
@@ -2649,10 +3100,12 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
     }
     if (!photo || !selectedWard) return;
     if (formOffline || navigator.onLine === false) {
-      setFormError("You appear to be offline. Reconnect and submit the report again.");
-      announce("You are offline. Reconnect to submit this report.");
+      const offlineMessage = t("form.offlineWarning");
+      setFormError(offlineMessage);
+      announce(offlineMessage);
       return;
     }
+    const gpsLocation = location && detectedWard?.ward_number === selectedWard.ward_number ? location : null;
     setSubmitting(true);
     setUploadProgress(null);
     const slowTimer = window.setTimeout(() => setSlowSubmit(true), 4500);
@@ -2661,13 +3114,13 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
       setUploadProgress(0);
       const upload = await backend.uploadReportPhoto(photo, { onProgress: setUploadProgress });
       const input: NewReportInput = {
-        latitude: location?.lat ?? selectedWard.center_lat,
-        longitude: location?.lng ?? selectedWard.center_lng,
-        gps_latitude: location?.lat ?? null,
-        gps_longitude: location?.lng ?? null,
-        gps_accuracy_meters: location?.accuracy ?? null,
-        gps_recorded_at: location?.recordedAt ?? null,
-        location_source: location ? "gps" : "ward_center",
+        latitude: gpsLocation?.lat ?? selectedWard.center_lat,
+        longitude: gpsLocation?.lng ?? selectedWard.center_lng,
+        gps_latitude: gpsLocation?.lat ?? null,
+        gps_longitude: gpsLocation?.lng ?? null,
+        gps_accuracy_meters: gpsLocation?.accuracy ?? null,
+        gps_recorded_at: gpsLocation?.recordedAt ?? null,
+        location_source: gpsLocation ? "gps" : "ward_center",
         ward_number: selectedWard.ward_number,
         address: address.trim(),
         severity,
@@ -2677,12 +3130,26 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
       };
       setSubmitStage("saving");
       const submitted = await backend.submitReport(input);
+      // Track locally so "My Reports" can list this submission on this device.
+      trackMyReport({
+        id: submitted.id,
+        title: getWardSelectLabel(selectedWard),
+        address: address.trim(),
+        createdAt: submitted.created_at
+      });
       setSubmittedReviewStatus(submitted.moderation_status ?? "flagged");
       setSubmittedReport(submitted);
       setSubmitSuccess(true);
       navigator.vibrate?.(35);
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : "Unable to submit report. Please try again.";
+      console.error("Submit failed", caught);
+      const rawMessage = caught instanceof Error ? caught.message : "";
+      const lowered = rawMessage.toLowerCase();
+      const message = lowered.includes("daily limit")
+        ? t("form.errDailyLimit")
+        : ["timed out", "unavailable", "fetch"].some((needle) => lowered.includes(needle))
+          ? t("form.errNetwork")
+          : t("form.errGeneric");
       setFormError(message);
       announce(message);
     } finally {
@@ -2695,7 +3162,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
   };
 
   return (
-    <DialogSurface ariaLabel="Report garbage" className="form-sheet" onClose={requestClose}>
+    <DialogSurface ariaLabel="Report garbage" className="form-sheet" disableEscape={showDiscardConfirm || Boolean(pendingViewReport)} onClose={requestClose}>
       {formStep > 1 && (
         <button className="sheet-back-button form-back" type="button" onClick={goToPreviousStep}>
           <ChevronLeft size={16} />
@@ -2708,7 +3175,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
       <div className="form-header">
         <div>
           <p className="eyebrow">Garbage Report</p>
-          <h2>Report Garbage</h2>
+          <h2>{t("action.reportGarbage")}</h2>
           <p>
             <strong>{currentStepTitle}</strong>{" "}
             {formStep === 1 && "Pick the area for this report."}
@@ -2727,13 +3194,14 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
           role="status"
           tabIndex={0}
           aria-label="Report submitted."
+          style={{ cursor: "default" }}
         >
           <CheckCircle2 size={36} />
-          <p className="eyebrow">Report Submitted</p>
-          <h3>Thanks for reporting this spot.</h3>
+          <p className="eyebrow">{t("success.eyebrow")}</p>
+          <h3>{t("success.title")}</h3>
           <p>
             {submittedReviewStatus === "approved"
-              ? "Your report is live on the map now."
+              ? t("success.subtitle")
               : "Thank you for your submission. We review every photo before it appears publicly. Misleading photos or information will be rejected by the admin."}
           </p>
           {submittedReviewStatus === "approved" ? (
@@ -2744,7 +3212,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
                 onClick={() => openSubmittedReport()}
               >
                 <ArrowUpRight size={14} />
-                View my report
+                {t("action.viewMyReport")}
               </button>
               <button
                 className="secondary-cta submit-share-button"
@@ -2755,27 +3223,35 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
                 }}
               >
                 <Share2 size={15} />
-                Share your report
+                {t("action.shareYourReport")}
               </button>
             </>
           ) : (
             <button className="primary-cta submit-open-button" type="button" onClick={onClose}>
               <CheckCircle2 size={14} />
-              Back to map
+              {t("action.back")}
             </button>
+          )}
+          {shareNote === "copied" && (
+            <p className="already-voted-note" role="status">Copied to clipboard.</p>
+          )}
+          {shareNote === "error" && (
+            <p className="warning-text" role="alert">Sharing failed. Check your connection and try again.</p>
           )}
         </div>
       )}
-      <div className="form-progress" aria-label={`Report progress step ${formStep} of 3`}>
-        <div>
-          <span>Step {formStep} of 3</span>
-          <strong>{progressLabel}</strong>
-        </div>
-        <em>{formStep === 3 ? "Final check" : "Guided report"}</em>
-        <i>
-          <b style={{ width: `${(formStep / 3) * 100}%` }} />
-        </i>
-      </div>
+      {!submitSuccess && (
+        <>
+          <div className="form-progress" aria-label={`Report progress step ${formStep} of 3`}>
+            <div>
+              <span>Step {formStep} of 3</span>
+              <strong>{progressLabel}</strong>
+            </div>
+            <em>{formStep === 3 ? "Final check" : "Guided report"}</em>
+            <i>
+              <b style={{ width: `${(formStep / 3) * 100}%` }} />
+            </i>
+          </div>
       {locationState === "outside" && (
         <div className="notice amber" role="alert">
           <CircleAlert size={16} />
@@ -2964,6 +3440,28 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
 
       {formStep === 3 && (
         <section className="wizard-panel" aria-labelledby="report-step-review">
+          {!location && <p className="muted">{t("dupes.noGps")}</p>}
+          {nearbyDuplicates.length > 0 && (
+            <div className="notice amber duplicate-warning" role="alert">
+              <CircleAlert size={16} />
+              <span>
+                <strong>{t("dupes.title")}</strong>
+                {nearbyDuplicates.slice(0, 2).map(({ match, report: nearby }) => (
+                  <span className="duplicate-match" key={nearby.id}>
+                    <em>{nearby.address}</em> · {t("dupes.metersAway", { count: Math.max(1, Math.round(match.distanceMeters)) })}
+                    <button type="button" className="tiny-action duplicate-view-action" onClick={() => requestViewReport(nearby)}>
+                      {t("dupes.viewReport")}
+                    </button>
+                  </span>
+                ))}
+                {nearbyDuplicates.length > 2 && (
+                  <span className="duplicate-match">
+                    <em>{t("dupes.more", { count: nearbyDuplicates.length - 2 })}</em>
+                  </span>
+                )}
+              </span>
+            </div>
+          )}
           <div className={clsx("review-card", !photo && "has-error")} id="report-step-review">
             <strong>{selectedWard ? selectedWardLabel : "Ward not selected"}</strong>
             <span>{address || "No landmark added yet"}</span>
@@ -2972,10 +3470,10 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
           <label className="field">
             <span>How Bad Is It?</span>
             <div className="option-grid">
-              {Object.entries(SEVERITY).map(([key, value]) => (
+              {Object.keys(SEVERITY).map((key) => (
                 <button type="button" className={clsx(severity === key && "is-selected")} onClick={() => setSeverity(key as SeverityKey)} key={key}>
                   <SeverityMark severityKey={key as SeverityKey} />
-                  <strong>{value.label}</strong>
+                  <strong>{severityLabel(key as SeverityKey)}</strong>
                   <small>{SEVERITY_SHORT_DESCRIPTIONS[key as SeverityKey]}</small>
                 </button>
               ))}
@@ -3010,11 +3508,14 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
         {slowSubmit && (
           <p className="warning-text" role="alert">This is taking longer than usual. Your photo may be on a slow connection, so please keep the form open.</p>
         )}
-        {formOffline && <p className="warning-text" role="alert">You are offline. Reconnect to submit this report.</p>}
+        {formOffline && <p className="warning-text" role="alert">{t("form.offlineWarning")}</p>}
         {formError && <p className="warning-text" role="alert">{formError}</p>}
-        <p className="anonymous form-trust-badge">
-          <ShieldCheck size={13} /> All reports are anonymous
-        </p>
+        <div className="form-footer-meta">
+          <p className="anonymous form-trust-badge">
+            <ShieldCheck size={13} /> All reports are anonymous
+          </p>
+          <p className="quota-note">{t("quota.left", { count: limit.remaining, total: limit.total })}</p>
+        </div>
         <div className="wizard-actions">
           {formStep > 1 && (
             <button className="secondary-cta" type="button" onClick={goToPreviousStep} disabled={submitting}>
@@ -3029,17 +3530,29 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
           ) : (
             <button className={clsx("primary-cta", formOffline && "is-offline")} onClick={() => void submit()} disabled={submitting || submitSuccess || formOffline}>
               {submitting ? <LoaderCircle className="spin" size={17} /> : submitSuccess ? <CheckCircle2 size={17} /> : <Send size={17} />}
-              {submitSuccess ? "Report submitted" : submitting ? submitProgressText : formOffline ? "Offline - reconnect" : "Submit Report"}
+              {submitSuccess ? t("form.submitted") : submitting ? submitProgressText : formOffline ? t("form.offlineButton") : t("action.submit")}
             </button>
           )}
         </div>
       </div>
+        </>
+      )}
       {showDiscardConfirm && (
         <DiscardReportDialog
           onCancel={() => setShowDiscardConfirm(false)}
           onConfirm={() => {
             setShowDiscardConfirm(false);
             onClose();
+          }}
+        />
+      )}
+      {pendingViewReport && (
+        <DiscardViewDialog
+          onCancel={() => setPendingViewReport(null)}
+          onConfirm={() => {
+            const target = pendingViewReport;
+            setPendingViewReport(null);
+            onViewReport(target);
           }}
         />
       )}
@@ -3065,24 +3578,37 @@ function ProfileSheet({
   const isWard = selection.type === "ward";
   const ward = isWard ? data.wards.find((item) => item.ward_number === Number(selection.id)) : null;
   const rep = !isWard
-    ? data.representatives.find((item) => item.role === selection.type && item.constituency === decodeURIComponent(selection.id))
+    ? data.representatives.find((item) => item.role === selection.type && item.constituency === selection.id)
     : null;
-  const profileReports = data.reports.filter((report) => {
-    const itemWard = data.wards.find((item) => item.ward_number === report.ward_number);
-    if (ward) return report.ward_number === ward.ward_number;
-    if (selection.type === "mla") return itemWard?.assembly_constituency === rep?.constituency;
-    return itemWard?.parliamentary_constituency === rep?.constituency;
-  });
+  const profileReports = useMemo(
+    () =>
+      data.reports.filter((report) => {
+        const itemWard = data.wards.find((item) => item.ward_number === report.ward_number);
+        if (ward) return report.ward_number === ward.ward_number;
+        if (selection.type === "mla") return itemWard?.assembly_constituency === rep?.constituency;
+        return itemWard?.parliamentary_constituency === rep?.constituency;
+      }),
+    [data.reports, data.wards, rep?.constituency, selection.type, ward]
+  );
   const activeReports = profileReports.filter((report) => report.status !== "resolved");
   const wardName = getDistinctWardName(ward);
   const wardMla = ward ? data.representatives.find((item) => item.role === "mla" && item.constituency === ward.assembly_constituency) : null;
   const wardMp = ward ? data.representatives.find((item) => item.role === "mp" && item.constituency === ward.parliamentary_constituency) : null;
   const contactRep = rep ?? wardMla;
   const [externalPreview, setExternalPreview] = useState<ExternalPreviewConfig | null>(null);
+  const [shareNote, setShareNote] = useState<"idle" | "copied" | "error">("idle");
+  const shareNoteTimerRef = useRef<number | null>(null);
   const averageActiveDays = Math.round(activeReports.reduce((sum, report) => sum + daysActive(report.created_at), 0) / Math.max(1, activeReports.length));
+
+  useEffect(() => {
+    return () => {
+      if (shareNoteTimerRef.current != null) window.clearTimeout(shareNoteTimerRef.current);
+    };
+  }, []);
 
   const previewCall = (label: string, value: string) => {
     setExternalPreview({
+      action: { kind: "tel", value },
       confirmLabel: "Call now",
       details: value,
       helper: `This will start a phone call to ${label}.`,
@@ -3100,18 +3626,27 @@ function ProfileSheet({
     try {
       if (navigator.share) {
         await navigator.share({ title: `Amma Odisha - ${name}`, text, url });
+        setShareNote("idle");
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        setShareNote("copied");
+        if (shareNoteTimerRef.current != null) window.clearTimeout(shareNoteTimerRef.current);
+        shareNoteTimerRef.current = window.setTimeout(() => setShareNote("idle"), 2000);
       } else {
-        await navigator.clipboard?.writeText(text);
+        throw new Error("Clipboard unavailable");
       }
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") return;
       console.error("Share failed", caught);
+      setShareNote("error");
     }
   };
 
   const confirmProfileExternalAction = () => {
     if (!externalPreview) return;
-    window.location.href = `tel:${externalPreview.details}`;
+    if (externalPreview.action.kind === "tel") {
+      window.location.href = `tel:${externalPreview.action.value}`;
+    }
     setExternalPreview(null);
   };
 
@@ -3140,6 +3675,36 @@ function ProfileSheet({
         <div className="accountability-card">
           <h3>Ward not found</h3>
           <p>This ward couldn't be found in our data. It may have been renumbered or the link may be outdated.</p>
+        </div>
+      </DialogSurface>
+    );
+  }
+
+  if (!isWard && !rep) {
+    return (
+      <DialogSurface
+        ariaLabel="Representative not found"
+        className="profile-sheet"
+        onClose={onClose}
+      >
+        <button className="sheet-back-button" type="button" onClick={onClose}>
+          <ChevronLeft size={16} />
+          Back to map
+        </button>
+        <button className="close-button" onClick={onClose} aria-label="Close profile">
+          <X size={18} />
+        </button>
+        <div className="profile-hero">
+          <ShieldCheck size={28} />
+          <div>
+            <p className="eyebrow">{selection.type.toUpperCase()} Profile</p>
+            <h2>{selection.id}</h2>
+            <p>No data available</p>
+          </div>
+        </div>
+        <div className="accountability-card">
+          <h3>Representative not found</h3>
+          <p>This representative couldn't be found in our data. The link may be outdated or the constituency may have changed.</p>
         </div>
       </DialogSurface>
     );
@@ -3182,14 +3747,14 @@ function ProfileSheet({
               <div className="elected-rep-card">
                 <Avatar rep={wardMla ?? undefined} />
                 <strong>{wardMla?.name ?? "Not mapped"}</strong>
-                <span className="elected-rep-role" style={{ color: getPartyColor(wardMla?.party) }}>
+                <span className="elected-rep-role" style={{ color: getPartyTextColor(wardMla?.party) }}>
                   {wardMla ? `${wardMla.party} · MLA` : `${ward.assembly_constituency} · MLA`}
                 </span>
               </div>
               <div className="elected-rep-card">
                 <Avatar rep={wardMp ?? undefined} />
                 <strong>{wardMp?.name ?? "Not mapped"}</strong>
-                <span className="elected-rep-role" style={{ color: getPartyColor(wardMp?.party) }}>
+                <span className="elected-rep-role" style={{ color: getPartyTextColor(wardMp?.party) }}>
                   {wardMp ? `${wardMp.party} · MP` : `${ward.parliamentary_constituency} · MP`}
                 </span>
               </div>
@@ -3206,6 +3771,12 @@ function ProfileSheet({
             <Share2 size={14} />
             Share ward data
           </button>
+        )}
+        {isWard && ward && shareNote === "copied" && (
+          <p className="already-voted-note" role="status">Copied to clipboard.</p>
+        )}
+        {isWard && ward && shareNote === "error" && (
+          <p className="warning-text" role="alert">Sharing failed. Check your connection and try again.</p>
         )}
         {contactRep && (contactRep.phone || contactRep.email || contactRep.twitter_handle || contactRep.profile_url) && (
           <div className="rep-contact-card">
@@ -3239,6 +3810,7 @@ function ProfileSheet({
         <h3>Top Locations</h3>
         <ReportList
           reports={profileReports}
+          resetKey={`${selection.type}:${selection.id}`}
           wards={data.wards}
           representatives={data.representatives}
           initialLimit={12}
@@ -3248,10 +3820,7 @@ function ProfileSheet({
         />
       {externalPreview && (
         <ExternalAppPreview
-          confirmLabel={externalPreview.confirmLabel}
-          details={externalPreview.details}
-          helper={externalPreview.helper}
-          title={externalPreview.title}
+          config={externalPreview}
           onClose={() => setExternalPreview(null)}
           onConfirm={confirmProfileExternalAction}
         />
@@ -3269,7 +3838,7 @@ function AboutSheet({ onClose, onOpenChangelog }: { onClose: () => void; onOpenC
         <button className="close-button" onClick={onClose} aria-label="Close about">
           <X size={18} />
         </button>
-        <img className="about-hero-image" src="/garbage-about.png" alt="Illegal garbage dumping in Bhubaneswar" />
+        <img className="about-hero-image" src="/garbage-about.jpg" alt="Illegal garbage dumping in Bhubaneswar" />
         <h2>Why Amma Odisha?</h2>
         <p className="eyebrow">AMMA ODISHA</p>
         <p>
@@ -3322,7 +3891,6 @@ function ChangelogSheet({ onClose }: { onClose: () => void }) {
         </button>
         <div className="sheet-title-row compact changelog-header">
           <h2>Changelog</h2>
-          <span className="version-badge">v{APP_VERSION}</span>
         </div>
         <p className="muted">What's new in Amma Odisha</p>
         {CHANGELOG.map((entry) => (
@@ -3332,9 +3900,9 @@ function ChangelogSheet({ onClose }: { onClose: () => void }) {
               <span className="pill green">{entry.tag}</span>
               <small>{entry.date}</small>
             </div>
-            {entry.changes.map((change) => (
-              <p key={change.text}>
-                <span aria-hidden="true">NEW</span> {change.text}
+            {entry.changes.map((change, index) => (
+              <p key={index}>
+                <span aria-hidden="true">{change.type.toUpperCase()}</span> {change.text}
               </p>
             ))}
           </div>
@@ -3346,6 +3914,32 @@ function ChangelogSheet({ onClose }: { onClose: () => void }) {
 function MobileQRModal({ onClose, url }: { onClose: () => void; url: string }) {
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(url)}`;
   const [qrFailed, setQrFailed] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const copyTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
+  const handleShareOrCopy = async () => {
+    setCopyState("idle");
+    try {
+      const result = await shareOrCopy(
+        { title: "Report on Amma Odisha", text: "Open Amma Odisha on your phone to report with the camera.", url },
+        url
+      );
+      if (result === "copied") {
+        setCopyState("copied");
+        if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = window.setTimeout(() => setCopyState("idle"), 2000);
+      }
+    } catch (caught) {
+      console.error("Share failed", caught);
+      setCopyState("error");
+    }
+  };
 
   return (
     <DialogSurface ariaLabel="Report on mobile" className="mini-card mobile-qr-modal" onClose={onClose}>
@@ -3372,14 +3966,13 @@ function MobileQRModal({ onClose, url }: { onClose: () => void; url: string }) {
         )}
       </div>
       <p className="mobile-qr-url">{url}</p>
-      <button
-        className="secondary-cta"
-        type="button"
-        onClick={() => void shareOrCopy({ title: "Report on Amma Odisha", text: "Open Amma Odisha on your phone to report with the camera.", url }, url)}
-      >
+      <button className="secondary-cta" type="button" onClick={() => void handleShareOrCopy()}>
         <Share2 size={15} />
-        Copy link
+        {copyState === "copied" ? "Link copied" : "Copy link"}
       </button>
+      {copyState === "error" && (
+        <p className="warning-text" role="alert">Could not copy the link. Long-press the URL above to copy it manually.</p>
+      )}
     </DialogSurface>
   );
 }
@@ -3407,7 +4000,7 @@ function TelegramToast({ trigger }: { trigger: boolean }) {
       >
         <X size={12} />
       </button>
-      <Sparkles size={16} />
+      <MessageCircle size={16} />
       <span>
         <strong>Join the community</strong>
         Feedback, ideas & updates on Telegram
