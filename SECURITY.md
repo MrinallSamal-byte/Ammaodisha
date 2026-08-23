@@ -6,7 +6,7 @@ Please do **not** open a public GitHub issue for security vulnerabilities.
 
 Instead, report privately:
 
-- **GitHub:** Use [Security → Report a vulnerability](https://github.com/MrinallSamal-byte/Garbage_BBSR/security/advisories/new)
+- **GitHub:** Use [Security → Report a vulnerability](https://github.com/MrinallSamal-byte/Garbage_Reporter_BBSR/security/advisories/new)
 - **Email:** the repository owner (see GitHub profile)
 
 Include: description, affected component/URL, reproduction steps, and impact assessment.

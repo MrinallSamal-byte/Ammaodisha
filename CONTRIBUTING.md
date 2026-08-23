@@ -5,8 +5,8 @@ Thanks for helping build a cleaner Bhubaneswar! 🧹
 ## Getting set up
 
 ```bash
-git clone https://github.com/MrinallSamal-byte/Garbage_BBSR.git
-cd Garbage_BBSR
+git clone https://github.com/MrinallSamal-byte/Garbage_Reporter_BBSR.git
+cd Garbage_Reporter_BBSR
 npm install
 cp .env.example .env.local   # fill in Supabase creds (or run in demo mode without them)
 npm run dev

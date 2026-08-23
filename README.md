@@ -6,7 +6,7 @@
 
 Report garbage dumps with photo + GPS · Auto-detect your ward, MLA & MP · Track resolution over time
 
-[![CI](https://github.com/MrinallSamal-byte/Garbage_BBSR/actions/workflows/ci.yml/badge.svg)](https://github.com/MrinallSamal-byte/Garbage_BBSR/actions/workflows/ci.yml)
+[![CI](https://github.com/MrinallSamal-byte/Garbage_Reporter_BBSR/actions/workflows/ci.yml/badge.svg)](https://github.com/MrinallSamal-byte/Garbage_Reporter_BBSR/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Tests](https://img.shields.io/badge/tests-87%20passing-brightgreen)
 [![Live site](https://img.shields.io/badge/live-ammaodisha.me-e31b23)](https://www.ammaodisha.me)
@@ -50,8 +50,8 @@ ladder, so neglect becomes visible and measurable.
 **Prerequisites:** Node.js ≥ 20 (22 recommended), npm.
 
 ```bash
-git clone https://github.com/MrinallSamal-byte/Garbage_BBSR.git
-cd Garbage_BBSR
+git clone https://github.com/MrinallSamal-byte/Garbage_Reporter_BBSR.git
+cd Garbage_Reporter_BBSR
 npm install
 cp .env.example .env.local   # then fill in your values
 npm run dev                  # http://localhost:5173
