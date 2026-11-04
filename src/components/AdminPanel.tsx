@@ -1,6 +1,7 @@
 import clsx from "clsx";
 import {
   ArrowUp,
+  ArrowUpDown,
   CheckCircle2,
   CircleCheck,
   CircleX,
@@ -74,6 +75,8 @@ export function AdminPanel() {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [queues, setQueues] = useState<Record<ModerationStatus, GarbageReport[]>>({ flagged: [], rejected: [], approved: [] });
   const [activeTab, setActiveTab] = useState<ModerationStatus>("flagged");
+  const [queueSort, setQueueSort] = useState<"newest" | "oldest">("newest");
+  const [confirmApproveAll, setConfirmApproveAll] = useState(false);
   const [loading, setLoading] = useState(false);
   const [actionError, setActionError] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
@@ -165,7 +168,12 @@ export function AdminPanel() {
     }
   };
 
-  const queue = queues[activeTab];
+  // FIFO review matters for fairness — the oldest pending report waited the longest.
+  const queue = useMemo(() => {
+    const items = queues[activeTab];
+    if (queueSort === "oldest") return [...items].sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
+    return items;
+  }, [queues, activeTab, queueSort]);
   const tabCounts = useMemo(() => tabs.map((tab) => ({ ...tab, count: stats?.[tab.key] ?? 0 })), [stats]);
 
   const onTouchEnd = (clientX: number, clientY: number) => {
@@ -210,6 +218,16 @@ export function AdminPanel() {
       unsubscribe();
     };
   }, [activeTab, adminKey, isLoggedIn, loadQueue]);
+
+  // Escape closes the bulk-approve confirmation.
+  useEffect(() => {
+    if (!confirmApproveAll) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setConfirmApproveAll(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [confirmApproveAll]);
 
   if (!isLoggedIn) {
     return (
@@ -296,6 +314,16 @@ export function AdminPanel() {
               {tab.label} {tab.count > 0 ? `(${tab.count})` : ""}
             </button>
           ))}
+          <button
+            type="button"
+            className="admin-sort-toggle"
+            onClick={() => setQueueSort((value) => (value === "newest" ? "oldest" : "newest"))}
+            aria-pressed={queueSort === "oldest"}
+            title="Toggle queue order"
+          >
+            <ArrowUpDown size={13} aria-hidden="true" />
+            {queueSort === "newest" ? "Newest first" : "Oldest first"}
+          </button>
         </nav>
         {actionError && (
           <p className="warning-text" style={{ margin: "8px 16px", padding: "10px 12px", borderRadius: 8, background: "var(--primary-soft)" }}>
@@ -304,7 +332,7 @@ export function AdminPanel() {
         )}
         <section className="admin-cards">
           {activeTab === "flagged" && queue.length > 3 && (
-            <button className="bulk-action" onClick={() => void approveAll()}>
+            <button className="bulk-action" onClick={() => setConfirmApproveAll(true)}>
               <CircleCheck size={14} />
               Approve All {queue.length} Flagged
             </button>
@@ -338,6 +366,43 @@ export function AdminPanel() {
         <button className="scroll-top" onClick={() => listRef.current?.scrollTo({ top: 0, behavior: "smooth" })} aria-label="Scroll to top">
           <ArrowUp size={18} />
         </button>
+      )}
+      {confirmApproveAll && (
+        <div
+          className="confirm-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-approve-all-title"
+          onClick={() => setConfirmApproveAll(false)}
+        >
+          <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>
+            <h2 id="confirm-approve-all-title">
+              Approve {queue.length} flagged {queue.length === 1 ? "report" : "reports"}?
+            </h2>
+            <p>They become visible on the public map immediately. Bulk approval cannot be undone — make sure each one is a genuine report.</p>
+            <ul className="confirm-sample">
+              {queue.slice(0, 3).map((report) => (
+                <li key={report.id}>{report.address}</li>
+              ))}
+            </ul>
+            {queue.length > 3 && <p className="confirm-more">+ {queue.length - 3} more in the queue</p>}
+            <div className="preview-actions">
+              <button className="secondary-cta" type="button" autoFocus onClick={() => setConfirmApproveAll(false)}>
+                Cancel
+              </button>
+              <button
+                className="primary-cta"
+                type="button"
+                onClick={() => {
+                  setConfirmApproveAll(false);
+                  void approveAll();
+                }}
+              >
+                Approve {queue.length}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {photo && (
         <button className="photo-viewer" onClick={() => setPhoto(null)} aria-label="Close photo viewer">
@@ -409,9 +474,20 @@ function ModerationCard({
   const isFallbackPhoto = useFallbackPhoto || fallbackPhotoFailed || !report.photo_url;
   const shouldCoverPhoto = isNsfwPhoto && !photoRevealed && !isFallbackPhoto;
 
+  const onActionRef = useRef(onAction);
+  useEffect(() => {
+    onActionRef.current = onAction;
+  }, [onAction]);
+
+  // If the card unmounts while a rejection is pending in the 4s undo window
+  // (tab switch, queue refresh), don't drop the rejection silently — flush it.
   useEffect(() => {
     return () => {
-      if (undoTimerRef.current != null) window.clearTimeout(undoTimerRef.current);
+      if (undoTimerRef.current != null) {
+        window.clearTimeout(undoTimerRef.current);
+        undoTimerRef.current = null;
+        void onActionRef.current("rejected");
+      }
     };
   }, []);
 
@@ -424,6 +500,7 @@ function ModerationCard({
     if (decision === "rejected") {
       setUndoVisible(true);
       undoTimerRef.current = window.setTimeout(async () => {
+        undoTimerRef.current = null;
         setUndoVisible(false);
         setBusy(true);
         try {
@@ -477,7 +554,7 @@ function ModerationCard({
               setUseFallbackPhoto(true);
             }}
           />
-          {isFallbackPhoto ? <span>Fallback</span> : shouldCoverPhoto && <span>Reveal</span>}
+          {isFallbackPhoto ? <span>{report.photo_credit ? "Licensed" : "Fallback"}</span> : shouldCoverPhoto && <span>Reveal</span>}
         </button>
         <div>
           <h2>{report.address}</h2>

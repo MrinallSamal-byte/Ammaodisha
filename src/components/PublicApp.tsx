@@ -7,9 +7,13 @@ import {
   ChevronLeft,
   ChevronDown,
   CircleAlert,
+  ClipboardList,
+  Download,
   ExternalLink,
+  Flame,
   Info,
   Layers,
+  Link2,
   List,
   LoaderCircle,
   Map as MapIcon,
@@ -30,13 +34,19 @@ import {
   X
 } from "lucide-react";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { DialogSurface } from "./DialogSurface";
+import { MyReportsSheet } from "./MyReportsSheet";
 import { BMC_CONTACTS, BMC_HELPLINE, BMC_NUMBER, CHANGELOG, CATEGORIES, PARTY_COLORS, SEVERITY, STATUS_LABELS } from "../services/constants";
 import { backend } from "../services/backend";
-import { findNearestWard, findWardInGeoJson, isInsideBoundary } from "../services/geo";
+import { downloadCsv, csvFilename, reportsToCsv } from "../services/export";
+import { findNearestWard, findWardInGeoJson, isInsideBoundary, distanceKm } from "../services/geo";
 import { canSubmitReport, hasUpvoted } from "../services/limits";
-import { LOCAL_REPORT_PHOTO_FALLBACK_URL, ODISHA_GARBAGE_FALLBACK_IMAGE } from "../services/report-images";
-import { generateBMCComplaint, getReportShareText, getWhatsAppUrl, shareOrCopy } from "../services/share";
-import { daysActive, timeAgo } from "../services/time";
+import { readMyReports } from "../services/my-reports";
+import { buildViewParams, loadPrefs, parseViewParams, savePrefs } from "../services/prefs";
+import { LOCAL_REPORT_PHOTO_FALLBACK_URL, ODISHA_GARBAGE_FALLBACK_IMAGE, validateImageFile } from "../services/report-images";
+import { copyTextToClipboard, generateBMCComplaint, getReportShareText, getWhatsAppUrl, notifyCopied, shareOrCopy } from "../services/share";
+import { safeExternalUrl, sanitizeHandle } from "../services/url";
+import { daysActive, daysToResolve, timeAgo } from "../services/time";
 import type {
   CivicData,
   GarbageReport,
@@ -48,8 +58,6 @@ import type {
 } from "../types/domain";
 
 const MapView = lazy(async () => ({ default: (await import("./MapView")).MapView }));
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const APP_VERSION = "0.3.0";
 const POPULAR_WARD_NUMBERS = [40, 30, 36, 37, 38, 41, 34, 19];
 const SEVERITY_SHORT_DESCRIPTIONS: Record<SeverityKey, string> = {
@@ -71,6 +79,8 @@ const SEVERITY_PRIORITY: Record<SeverityKey, number> = {
   large: 3,
   massive: 4
 };
+const REPORT_DRAFT_KEY = "nk_report_draft";
+const NEARBY_RADIUS_METERS = 150;
 
 type RouteSelection =
   | { type: "report"; id: string }
@@ -169,159 +179,13 @@ function writeStorageValue(key: string, value: string) {
   }
 }
 
-function getFocusableElements(container: HTMLElement) {
-  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((element) => {
-    const style = window.getComputedStyle(element);
-    return style.display !== "none" && style.visibility !== "hidden";
-  });
-}
-
-function DialogSurface({
-  ariaLabel,
-  ariaLabelledBy,
-  children,
-  className,
-  disableEscape = false,
-  disableFocusTrap = false,
-  layerClassName = "modal-layer",
-  onClose
-}: {
-  ariaLabel?: string;
-  ariaLabelledBy?: string;
-  children: ReactNode;
-  className: string;
-  disableEscape?: boolean;
-  disableFocusTrap?: boolean;
-  layerClassName?: string;
-  onClose: () => void;
-}) {
-  const dialogRef = useRef<HTMLElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-  const dragRef = useRef<{ active: boolean; lastDelta: number; pointerId: number; startY: number } | null>(null);
-  const supportsSwipeDismiss = className
-    .split(/\s+/)
-    .some((name) => ["detail-sheet", "form-sheet", "profile-sheet", "insights-sheet", "filter-sheet"].includes(name));
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-
-    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const frame = window.requestAnimationFrame(() => {
-      const firstFocusable = getFocusableElements(dialog)[0];
-      (firstFocusable ?? dialog).focus({ preventScroll: true });
-    });
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !disableEscape) {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-
-      if (event.key !== "Tab" || disableFocusTrap) return;
-
-      const focusable = getFocusableElements(dialog);
-      if (!focusable.length) {
-        event.preventDefault();
-        dialog.focus({ preventScroll: true });
-        return;
-      }
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement;
-
-      if (event.shiftKey && active === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault();
-        first.focus();
-      } else if (active instanceof HTMLElement && !dialog.contains(active)) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      document.removeEventListener("keydown", onKeyDown);
-      previousFocusRef.current?.focus({ preventScroll: true });
-    };
-  }, [disableEscape, disableFocusTrap, onClose]);
-
-  return (
-    <div
-      className={layerClassName}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <article
-        ref={dialogRef}
-        className={className}
-        role="dialog"
-        aria-label={ariaLabel}
-        aria-labelledby={ariaLabelledBy}
-        aria-modal="true"
-        tabIndex={-1}
-        onMouseDown={(event) => event.stopPropagation()}
-        onPointerDown={(event) => {
-          if (!supportsSwipeDismiss || window.innerWidth >= 720) return;
-          if (event.pointerType === "mouse" && event.button !== 0) return;
-
-          const target = event.target as HTMLElement;
-          const sheet = event.currentTarget;
-          const topOffset = event.clientY - sheet.getBoundingClientRect().top;
-          if (topOffset > 44) return;
-          if (target !== sheet && target.closest("button,a,input,select,textarea,label")) return;
-
-          dragRef.current = { active: true, lastDelta: 0, pointerId: event.pointerId, startY: event.clientY };
-          sheet.setPointerCapture?.(event.pointerId);
-          sheet.classList.add("is-dragging");
-          sheet.style.transition = "none";
-          sheet.style.willChange = "transform";
-        }}
-        onPointerMove={(event) => {
-          const drag = dragRef.current;
-          if (!drag?.active || drag.pointerId !== event.pointerId) return;
-          const delta = Math.max(0, event.clientY - drag.startY);
-          drag.lastDelta = delta;
-          if (delta > 2) event.preventDefault();
-          event.currentTarget.style.transform = `translateY(${Math.round(delta)}px)`;
-        }}
-        onPointerUp={(event) => {
-          const drag = dragRef.current;
-          if (!drag?.active || drag.pointerId !== event.pointerId) return;
-          const shouldClose = drag.lastDelta > 120;
-          dragRef.current = null;
-          event.currentTarget.releasePointerCapture?.(event.pointerId);
-          event.currentTarget.classList.remove("is-dragging");
-          event.currentTarget.style.transition = "";
-          event.currentTarget.style.transform = "";
-          event.currentTarget.style.willChange = "";
-          if (shouldClose) onClose();
-        }}
-        onPointerCancel={(event) => {
-          const drag = dragRef.current;
-          if (!drag?.active || drag.pointerId !== event.pointerId) return;
-          dragRef.current = null;
-          event.currentTarget.releasePointerCapture?.(event.pointerId);
-          event.currentTarget.classList.remove("is-dragging");
-          event.currentTarget.style.transition = "";
-          event.currentTarget.style.transform = "";
-          event.currentTarget.style.willChange = "";
-        }}
-      >
-        {children}
-      </article>
-    </div>
-  );
-}
-
 export function PublicApp({ autoOpenReport = false, data, routeSelection, routeState, onDataChange, navigate }: PublicAppProps) {
+  // Shareable-view params (?ward&severity&status&q) win over saved prefs;
+  // saved prefs win over defaults. Computed once for first paint.
+  const [viewParams] = useState(() =>
+    parseViewParams(window.location.search, data.wards.map((ward) => ward.ward_number))
+  );
+  const [initialPrefs] = useState(loadPrefs);
   const [reports, setReports] = useState(data.reports);
   const [selectedReport, setSelectedReport] = useState<GarbageReport | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<RouteSelection>(null);
@@ -329,9 +193,9 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
   const [returnReport, setReturnReport] = useState<GarbageReport | null>(null);
   const [focusWardNumber, setFocusWardNumber] = useState<number | null>(null);
   const [focusRequestId, setFocusRequestId] = useState(0);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sortBy, setSortBy] = useState<"newest" | "upvotes" | "oldest">("newest");
-  const [wardFilterNumber, setWardFilterNumber] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState(() => viewParams.q ?? "");
+  const [sortBy, setSortBy] = useState<"newest" | "upvotes" | "oldest">(() => initialPrefs.sortBy ?? "newest");
+  const [wardFilterNumber, setWardFilterNumber] = useState<number | null>(() => viewParams.ward ?? null);
   const [wardFilterState, setWardFilterState] = useState<"idle" | "locating" | "error">("idle");
   const [showReportForm, setShowReportForm] = useState(false);
   const [showInsights, setShowInsights] = useState(false);
@@ -343,11 +207,21 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
   const [hasInteracted, setHasInteracted] = useState(false);
   const [showReportCoach, setShowReportCoach] = useState(() => readStorageValue("nk_report_coach_seen") !== "1");
   const [filterPulse, setFilterPulse] = useState(false);
-  const [viewMode, setViewMode] = useState<"map" | "list">("map");
+  const [viewMode, setViewMode] = useState<"map" | "list">(() => initialPrefs.viewMode ?? "map");
   const [showFilters, setShowFilters] = useState(false);
   const [isOffline, setIsOffline] = useState(() => typeof navigator !== "undefined" && navigator.onLine === false);
-  const [severityFilter, setSeverityFilter] = useState<"all" | SeverityKey>("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | "unresolved" | "resolved">("all");
+  const [severityFilter, setSeverityFilter] = useState<"all" | SeverityKey>(() => viewParams.severity ?? initialPrefs.severityFilter ?? "all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "unresolved" | "resolved">(() => viewParams.status ?? initialPrefs.statusFilter ?? "all");
+  // "Open 30+ days" filters unresolved reports only, so a saved staleOnly
+  // preference or shared ?status=resolved link must win over each other.
+  const [staleOnly, setStaleOnly] = useState<boolean>(() =>
+    viewParams.status === "resolved" ? false : viewParams.stale ?? initialPrefs.staleOnly ?? false
+  );
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showMyReports, setShowMyReports] = useState(false);
+  const [copiedToast, setCopiedToast] = useState(false);
+  const [myReportCount, setMyReportCount] = useState(() => readMyReports().length);
+  const [lastVisitAt] = useState(() => loadPrefs().lastVisitAt ?? null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState("");
 
@@ -356,6 +230,73 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
   useEffect(() => {
     setReports(data.reports);
   }, [data.reports]);
+
+  // Persist view preferences for the next visit.
+  useEffect(() => {
+    savePrefs({ viewMode, sortBy, severityFilter, statusFilter, staleOnly });
+  }, [viewMode, sortBy, severityFilter, statusFilter, staleOnly]);
+
+  // Stamp the visit a few seconds in; the "what's new" badge only counts
+  // reports created after the previous visit.
+  useEffect(() => {
+    const timer = window.setTimeout(() => savePrefs({ lastVisitAt: new Date().toISOString() }), 5000);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  // Keep the My Reports badge count fresh after the sheet closes.
+  useEffect(() => {
+    if (!showMyReports) setMyReportCount(readMyReports().length);
+  }, [showMyReports]);
+
+  // Transient "Link copied" toast, triggered by any copy in the app.
+  useEffect(() => {
+    const onCopied = () => setCopiedToast(true);
+    window.addEventListener("amma:copied", onCopied);
+    return () => window.removeEventListener("amma:copied", onCopied);
+  }, []);
+  useEffect(() => {
+    if (!copiedToast) return;
+    const timer = window.setTimeout(() => setCopiedToast(false), 2600);
+    return () => window.clearTimeout(timer);
+  }, [copiedToast]);
+
+  // Keyboard shortcuts for faster desktop use: / search, N new report,
+  // M toggle map/list, ? shortcuts help. Ignored while typing in a field or
+  // while a modal is open — otherwise N would stack the report wizard on top
+  // of the filter sheet, and Esc would close both at once.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      const typing = Boolean(
+        target &&
+          (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)
+      );
+      if (typing) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      if (event.key === "/") {
+        event.preventDefault();
+        setShowFilters(true);
+        return;
+      }
+      if (event.key === "n" || event.key === "N") {
+        event.preventDefault();
+        setShowReportForm(true);
+        return;
+      }
+      if (event.key === "m" || event.key === "M") {
+        event.preventDefault();
+        setViewMode((mode) => (mode === "map" ? "list" : "map"));
+        return;
+      }
+      if (event.key === "?") {
+        event.preventDefault();
+        setShowShortcuts((value) => !value);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   useEffect(() => {
     if (!autoOpenReport) return;
@@ -439,6 +380,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
     return reports.filter((report) => {
       if (severityFilter !== "all" && report.severity !== severityFilter) return false;
       if (statusFilter !== "all" && report.status !== statusFilter) return false;
+      if (staleOnly && !(report.status !== "resolved" && daysActive(report.created_at) >= 30)) return false;
       if (wardFilterNumber != null && report.ward_number !== wardFilterNumber) return false;
       if (!query) return true;
       const ward = wardsByNumber.get(report.ward_number);
@@ -460,7 +402,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
         .toLowerCase();
       return haystack.includes(query);
     });
-  }, [reports, representativeSearchByWard, searchQuery, severityFilter, statusFilter, wardFilterNumber, wardsByNumber]);
+  }, [reports, representativeSearchByWard, searchQuery, severityFilter, statusFilter, staleOnly, wardFilterNumber, wardsByNumber]);
 
   const visibleReports = useMemo(() => {
     const next = [...filteredReports];
@@ -493,9 +435,15 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
     return { unresolved: nextUnresolved, resolved: nextResolved };
   }, [reports]);
   const worstWards = useMemo(() => getWorstWards(filteredReports, data.wards), [filteredReports, data.wards]);
+  const newReportCount = useMemo(() => {
+    if (!lastVisitAt) return 0;
+    const cutoff = +new Date(lastVisitAt);
+    if (!Number.isFinite(cutoff)) return 0;
+    return reports.reduce((count, report) => (+new Date(report.created_at) > cutoff ? count + 1 : count), 0);
+  }, [lastVisitAt, reports]);
   const filteredWard = wardFilterNumber != null ? wardsByNumber.get(wardFilterNumber) : null;
   const hasActiveFilters =
-    Boolean(searchQuery.trim()) || severityFilter !== "all" || statusFilter !== "all" || wardFilterNumber != null;
+    Boolean(searchQuery.trim()) || severityFilter !== "all" || statusFilter !== "all" || wardFilterNumber != null || staleOnly;
 
   // Refresh: surface errors as a brief visual indicator rather than silently failing.
   const refreshReports = async () => {
@@ -530,6 +478,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
     setShowReportForm(false);
     setReturnProfile(null);
     setReturnReport(null);
+    setMyReportCount(readMyReports().length);
     setSelectedReport(report);
     navigate(`/report/${report.id}`);
   };
@@ -590,8 +539,42 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
     setWardFilterNumber(null);
     setSearchQuery("");
     setSortBy("newest");
+    setStaleOnly(false);
     setWardFilterState("idle");
   }, []);
+
+  const exportVisibleReports = useCallback(() => {
+    if (!visibleReports.length) return;
+    downloadCsv(csvFilename(), reportsToCsv(visibleReports, data.wards));
+  }, [data.wards, visibleReports]);
+
+  const copyViewLink = useCallback(async () => {
+    const query = buildViewParams({ ward: wardFilterNumber, severity: severityFilter, status: statusFilter, stale: staleOnly, q: searchQuery });
+    const url = `${window.location.origin}/${query ? `?${query}` : ""}`;
+    try {
+      await copyTextToClipboard(url);
+      notifyCopied();
+    } catch {
+      // Clipboard blocked — fall back to the share sheet / copy helper.
+      try {
+        await shareOrCopy({ title: "Amma Odisha view", text: "Filtered report view", url }, url);
+      } catch (caught) {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+        console.error("Share failed", caught);
+      }
+    }
+  }, [searchQuery, severityFilter, statusFilter, staleOnly, wardFilterNumber]);
+
+  const openMyReport = useCallback(
+    (report: GarbageReport) => {
+      setShowMyReports(false);
+      setReturnProfile(null);
+      setReturnReport(null);
+      setSelectedReport(report);
+      navigate(`/report/${report.id}`);
+    },
+    [navigate]
+  );
 
   const activeFilterSummary = useMemo(() => {
     const labels: string[] = [];
@@ -599,9 +582,10 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
     if (query) labels.push(`Search: ${query}`);
     if (severityFilter !== "all") labels.push(`Severity: ${SEVERITY[severityFilter].label}`);
     if (statusFilter !== "all") labels.push(`Status: ${statusFilter === "resolved" ? "Cleaned" : "Unresolved"}`);
+    if (staleOnly) labels.push("Open 30+ days");
     if (wardFilterNumber != null) labels.push(`Ward ${wardFilterNumber}`);
     return labels;
-  }, [searchQuery, severityFilter, statusFilter, wardFilterNumber]);
+  }, [searchQuery, severityFilter, statusFilter, staleOnly, wardFilterNumber]);
   const activeFilterCount = activeFilterSummary.length;
 
   useEffect(() => {
@@ -647,7 +631,10 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
       : "New approved reports will appear here as active map markers.";
 
   return (
-    <div className="app-frame">
+    <div className="app-frame" id="main-content" tabIndex={-1}>
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
       {viewMode === "map" && (
         <Suspense
           fallback={
@@ -682,6 +669,15 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
         </div>
         <div className="topbar-actions">
           <button
+            className="icon-button my-reports-button"
+            onClick={() => setShowMyReports(true)}
+            aria-label={myReportCount > 0 ? `My reports — ${myReportCount} filed from this device` : "My reports"}
+            title="My reports"
+          >
+            <ClipboardList size={17} />
+            {myReportCount > 0 && <span className="my-reports-badge" aria-hidden="true">{myReportCount > 9 ? "9+" : myReportCount}</span>}
+          </button>
+          <button
             className="icon-button"
             onClick={() => setShowAbout(true)}
             aria-label="About Amma Odisha"
@@ -715,7 +711,13 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
             <select
               name="statusFilter"
               value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value as "all" | "unresolved" | "resolved")}
+              onChange={(event) => {
+                const next = event.target.value as "all" | "unresolved" | "resolved";
+                setStatusFilter(next);
+                // "Open 30+ days" only applies to unresolved reports; keeping it
+                // on with Status=Resolved can never match anything.
+                if (next === "resolved") setStaleOnly(false);
+              }}
               aria-label="Filter by status"
             >
               <option value="all">All Status</option>
@@ -778,7 +780,7 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
               <CircleAlert size={16} />
               <span>
                 <strong>You are offline</strong>
-                Cached reports are still available, but submitting may fail.
+                Showing the last loaded reports — refresh and submitting may fail until you reconnect.
               </span>
             </div>
           )}
@@ -823,6 +825,9 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
           setStatusFilter={setStatusFilter}
           severityFilter={severityFilter}
           sortBy={sortBy}
+          staleOnly={staleOnly}
+          setStaleOnly={setStaleOnly}
+          onCopyViewLink={() => void copyViewLink()}
           statusFilter={statusFilter}
           visibleCount={visibleReports.length}
           wardFilterNumber={wardFilterNumber}
@@ -882,6 +887,17 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
               <span className="list-stat list-stat-green">
                 <strong>{resolved.length}</strong> resolved
               </span>
+              <button
+                type="button"
+                className="export-button list-export-button"
+                onClick={exportVisibleReports}
+                disabled={!visibleReports.length}
+                title="Export the currently listed reports as CSV"
+                aria-label={`Export ${visibleReports.length} visible ${visibleReports.length === 1 ? "report" : "reports"} as CSV`}
+              >
+                <Download size={13} aria-hidden="true" />
+                CSV
+              </button>
             </div>
           </div>
           <ReportList
@@ -924,12 +940,17 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
           <Smartphone size={17} />
           Scan QR to Report
         </button>
-        <button className="insights-button" type="button" onClick={() => setShowInsights(true)} aria-label="Open Amma Odisha insights">
+        <button className="insights-button" type="button" onClick={() => setShowInsights(true)} aria-label={newReportCount > 0 ? `Open insights — ${newReportCount} new reports since your last visit` : "Open Amma Odisha insights"}>
           <BarChart3 size={18} />
           <span>
             <strong>{visibleReports.length}</strong>
             <small>Insights</small>
           </span>
+          {newReportCount > 0 && (
+            <span className="insights-new-badge" aria-hidden="true">
+              {newReportCount > 9 ? "9+" : newReportCount}
+            </span>
+          )}
         </button>
       </footer>
 
@@ -976,10 +997,42 @@ export function PublicApp({ autoOpenReport = false, data, routeSelection, routeS
         />
       )}
       {showMobileQR && <MobileQRModal url={`${window.location.origin}/?action=report`} onClose={() => setShowMobileQR(false)} />}
+      {showMyReports && (
+        <MyReportsSheet
+          publicReports={reports}
+          onClose={() => setShowMyReports(false)}
+          onReportNew={() => {
+            setShowMyReports(false);
+            setShowReportForm(true);
+          }}
+          onViewReport={openMyReport}
+        />
+      )}
+      {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
+      {copiedToast && (
+        <div className="copy-toast" role="status">
+          <Link2 size={14} aria-hidden="true" />
+          Link copied to clipboard
+        </div>
+      )}
       {!showIntro && !showReportForm && !selectedReport && !selectedProfile && !showInsights && (
         <TelegramToast trigger={hasInteracted} />
       )}
-      {showReportForm && <ReportForm data={data} onClose={() => setShowReportForm(false)} onSubmit={onSubmitted} />}
+      {showReportForm && (
+        <ReportForm
+          data={data}
+          onClose={() => setShowReportForm(false)}
+          onSubmit={onSubmitted}
+          onTrackReport={() => {
+            setShowReportForm(false);
+            setShowMyReports(true);
+          }}
+          onViewReport={(report) => {
+            setShowReportForm(false);
+            openMyReport(report);
+          }}
+        />
+      )}
       {selectedReport && (
         <ReportDetail
           report={selectedReport}
@@ -1082,6 +1135,9 @@ function FilterSheet({
   setStatusFilter,
   severityFilter,
   sortBy,
+  staleOnly,
+  setStaleOnly,
+  onCopyViewLink,
   statusFilter,
   visibleCount,
   wardFilterNumber,
@@ -1103,6 +1159,9 @@ function FilterSheet({
   severityFilter: "all" | SeverityKey;
   sortBy: "newest" | "upvotes" | "oldest";
   statusFilter: "all" | "unresolved" | "resolved";
+  staleOnly: boolean;
+  setStaleOnly: (value: boolean) => void;
+  onCopyViewLink: () => void;
   visibleCount: number;
   wardFilterNumber: number | null;
   wardFilterState: "idle" | "locating" | "error";
@@ -1159,7 +1218,15 @@ function FilterSheet({
         </label>
         <label className="filter-field">
           <span>Status</span>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | "unresolved" | "resolved")} aria-label="Filter by status">
+          <select
+            value={statusFilter}
+            onChange={(event) => {
+              const next = event.target.value as "all" | "unresolved" | "resolved";
+              setStatusFilter(next);
+              if (next === "resolved") setStaleOnly(false);
+            }}
+            aria-label="Filter by status"
+          >
             <option value="all">All status</option>
             <option value="unresolved">Unresolved / Active</option>
             <option value="resolved">Cleaned / Resolved</option>
@@ -1174,6 +1241,27 @@ function FilterSheet({
           </select>
         </label>
       </div>
+      <button
+        type="button"
+        className={clsx("stale-toggle", staleOnly && "is-active")}
+        aria-pressed={staleOnly}
+        onClick={() => {
+          const next = !staleOnly;
+          setStaleOnly(next);
+          // Stale dumps are by definition unresolved — enabling this filter
+          // while Status=Resolved would show an empty list.
+          if (next && statusFilter === "resolved") setStatusFilter("unresolved");
+        }}
+      >
+        <Flame size={15} aria-hidden="true" />
+        <span className="stale-toggle-text">
+          <strong>Open 30+ days</strong>
+          <small>Longest-ignored dumps still waiting for cleanup</small>
+        </span>
+        <span className={clsx("stale-toggle-pill", staleOnly && "is-on")} aria-hidden="true">
+          {staleOnly ? "On" : "Off"}
+        </span>
+      </button>
       <div className="filter-summary" aria-label="Active report filters">
         <span>
           <strong>{visibleCount}</strong> matching {visibleCount === 1 ? "report" : "reports"}
@@ -1192,6 +1280,10 @@ function FilterSheet({
         <button type="button" className="secondary-cta" onClick={clearFilters} disabled={activeFilterCount === 0 && sortBy === "newest"}>
           <X size={14} />
           Clear
+        </button>
+        <button type="button" className="secondary-cta" onClick={onCopyViewLink} title="Copy a link that restores this exact filtered view">
+          <Link2 size={14} />
+          Copy view link
         </button>
         <button type="button" className="secondary-cta" onClick={() => void onRefresh()} disabled={refreshing}>
           {refreshing ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
@@ -1385,7 +1477,7 @@ function IntroHeroImage() {
     );
   }
 
-  return <img className="intro-hero-image" src="/garbage-hero.png" alt="Garbage on streets of Bhubaneswar" onError={() => setFailed(true)} />;
+  return <img className="intro-hero-image" src="/garbage-hero.jpg" alt="Garbage on streets of Bhubaneswar" onError={() => setFailed(true)} />;
 }
 
 function ReportList({
@@ -1654,6 +1746,7 @@ function ReportDetail({
   const [upvoted, setUpvoted] = useState(() => hasUpvoted(report.id));
   const [upvoteBump, setUpvoteBump] = useState(false);
   const [alreadyVotedNote, setAlreadyVotedNote] = useState(false);
+  const [upvoteError, setUpvoteError] = useState(false);
   const [showResolve, setShowResolve] = useState(false);
   const [compareValue, setCompareValue] = useState(50);
   const [externalPreview, setExternalPreview] = useState<ExternalPreviewConfig | null>(null);
@@ -1665,6 +1758,7 @@ function ReportDetail({
     setIsUpvoting(false);
     setUpvoteBump(false);
     setAlreadyVotedNote(false);
+    setUpvoteError(false);
   }, [report.id]);
 
   useEffect(() => {
@@ -1684,11 +1778,12 @@ function ReportDetail({
   const mla = data.representatives.find((rep) => rep.role === "mla" && rep.constituency === ward?.assembly_constituency);
   const mp = data.representatives.find((rep) => rep.role === "mp" && rep.constituency === ward?.parliamentary_constituency);
   const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
-  const canCompareResolvedPhotos = Boolean(report.photo_url && report.resolved_photo_url);
+  const canCompareResolvedPhotos = Boolean(report.status === "resolved" && report.photo_url && report.resolved_photo_url);
 
   const upvote = async () => {
     if (isUpvoting || upvoted) return;
     setIsUpvoting(true);
+    setUpvoteError(false);
     try {
       const result = await backend.upvoteReport(report.id);
       setUpvoted(true);
@@ -1704,8 +1799,21 @@ function ReportDetail({
       }
     } catch (error) {
       console.error("Upvote failed", error);
+      setUpvoteError(true);
     } finally {
       setIsUpvoting(false);
+    }
+  };
+
+  const shareCleanupWin = async () => {
+    const url = `${location.origin}/report/${report.id}`;
+    const days = daysToResolve(report.created_at, report.resolved_at);
+    const text = `Ward ${report.ward_number} cleaned up a garbage dump after ${days} days — citizen pressure works. Track Bhubaneswar's dumps on Amma Odisha → ${url}`;
+    try {
+      await shareOrCopy({ title: `Ward ${report.ward_number} cleanup win`, text, url }, url);
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      console.error("Share failed", caught);
     }
   };
 
@@ -1825,6 +1933,14 @@ function ReportDetail({
             width={report.photo_width}
             height={report.photo_height}
           />
+          {report.photo_credit && (
+            <span
+              className="photo-credit-chip"
+              title="This image comes from a licensed source (for example Wikimedia Commons) to illustrate the issue — it is not the reporter's photo."
+            >
+              Representative photo · {report.photo_credit}
+            </span>
+          )}
           <button
             className={clsx("detail-upvote-overlay", upvoted && "is-upvoted", upvoteBump && "is-bumped")}
             onClick={() => void upvote()}
@@ -1840,7 +1956,7 @@ function ReportDetail({
         <div className="detail-stats-row">
           <div className="detail-stat">
             <strong style={{ color: severity.color }}>{report.upvote_count || 1}</strong>
-            <span>Reports</span>
+            <span>Upvotes</span>
           </div>
           <div className="detail-stat-divider" aria-hidden="true" />
           <div className="detail-stat">
@@ -1859,6 +1975,14 @@ function ReportDetail({
           {alreadyVotedNote && (
             <p className="already-voted-note" role="status">
               You already supported this report from another device.
+            </p>
+          )}
+          {upvoteError && (
+            <p className="upvote-error-note" role="alert">
+              Couldn&apos;t record your upvote. Check your connection.
+              <button type="button" onClick={() => void upvote()}>
+                Retry
+              </button>
             </p>
           )}
           {report.moderation_status === "flagged" && (
@@ -1919,6 +2043,12 @@ function ReportDetail({
           </div>
 
           <div className="detail-actions">
+            {report.status === "resolved" && (
+              <button className="green-action" type="button" onClick={() => void shareCleanupWin()}>
+                <Share2 size={15} />
+                Share the cleanup win
+              </button>
+            )}
             <button className="directions-link" onClick={prepareDirections}>
               <ArrowUpRight size={15} />
               Get directions
@@ -2044,6 +2174,7 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
   const [failedDistance, setFailedDistance] = useState<number | null>(null);
   const [saveError, setSaveError] = useState("");
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [photoError, setPhotoError] = useState("");
 
   // Clean up object URLs to prevent memory leaks
   const previewRef = useRef<string | null>(null);
@@ -2068,7 +2199,8 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
       (position) => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
-        const distanceMeters = Math.hypot((lat - report.latitude) * 111_000, (lng - report.longitude) * 111_000);
+        const distanceMeters =
+          distanceKm({ latitude: lat, longitude: lng }, { latitude: report.latitude, longitude: report.longitude }) * 1000;
         setFailedDistance(distanceMeters);
         if (distanceMeters > 500) {
           setStatus("mismatch");
@@ -2120,6 +2252,12 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
 
   const onFile = (file?: File) => {
     if (!file) return;
+    const invalid = validateImageFile(file);
+    if (invalid) {
+      setPhotoError(invalid);
+      return;
+    }
+    setPhotoError("");
     if (previewRef.current) URL.revokeObjectURL(previewRef.current);
     const url = URL.createObjectURL(file);
     previewRef.current = url;
@@ -2170,6 +2308,11 @@ function ResolveModal({ report, onClose, onResolved }: { report: GarbageReport; 
             onChange={(event) => onFile(event.target.files?.[0])}
           />
         </label>
+        {photoError && (
+          <p className="warning-text" role="alert">
+            {photoError}
+          </p>
+        )}
         {status === "saving" && uploadProgress != null && (
           <div className="upload-progress-panel" role="status">
             <span>
@@ -2300,7 +2443,7 @@ function DiscardReportDialog({ onCancel, onConfirm }: { onCancel: () => void; on
 type ReportFormStep = 1 | 2 | 3;
 type ReportFieldKey = "photo" | "ward" | "address";
 
-function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () => void; onSubmit: (report: GarbageReport) => void }) {
+function ReportForm({ data, onClose, onSubmit, onTrackReport, onViewReport }: { data: CivicData; onClose: () => void; onSubmit: (report: GarbageReport) => void; onTrackReport?: () => void; onViewReport?: (report: GarbageReport) => void }) {
   const [formStep, setFormStep] = useState<ReportFormStep>(1);
   const [wardNumber, setWardNumber] = useState("");
   const [wardSearch, setWardSearch] = useState("");
@@ -2326,6 +2469,9 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<ReportFieldKey, string>>>({});
   const [formOffline, setFormOffline] = useState(() => typeof navigator !== "undefined" && navigator.onLine === false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const [draftAvailable, setDraftAvailable] = useState(() => readStorageValue(REPORT_DRAFT_KEY) != null);
+  const [nearbyUpvoted, setNearbyUpvoted] = useState<Record<string, boolean>>({});
+  const [nearbyBusy, setNearbyBusy] = useState<string | null>(null);
   const limit = canSubmitReport();
   const selectedWard = detectedWard ?? data.wards.find((ward) => ward.ward_number === Number(wardNumber));
   const selectedWardLabel = selectedWard ? getWardSelectLabel(selectedWard) : "";
@@ -2415,6 +2561,107 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
     };
   }, []);
 
+  // Auto-save the wizard so an interrupted report (dropped call, dead
+  // battery) can be resumed — photos can't be persisted, everything else can.
+  // Note: on first mount with an empty form we must NOT touch storage or we
+  // would delete a restorable draft before the user sees the banner.
+  const hadDraftContentRef = useRef(false);
+  useEffect(() => {
+    if (submitSuccess) return;
+    const hasContent = Boolean(wardNumber || detectedWard || location || address.trim());
+    try {
+      if (!hasContent) {
+        if (hadDraftContentRef.current) {
+          localStorage.removeItem(REPORT_DRAFT_KEY);
+          hadDraftContentRef.current = false;
+        }
+        return;
+      }
+      hadDraftContentRef.current = true;
+      writeStorageValue(
+        REPORT_DRAFT_KEY,
+        JSON.stringify({ wardNumber, location, address, severity, category })
+      );
+    } catch {
+      // Storage unavailable — drafts simply won't persist this session.
+    }
+  }, [wardNumber, detectedWard, location, address, severity, category, submitSuccess]);
+
+  const nearbyReports = useMemo(() => {
+    if (formStep !== 3 || !location) return [];
+    const origin = { latitude: location.lat, longitude: location.lng };
+    return data.reports
+      .filter((report) => report.status !== "resolved")
+      .map((report) => ({
+        report,
+        distanceMeters: distanceKm(origin, { latitude: report.latitude, longitude: report.longitude }) * 1000
+      }))
+      .filter((entry) => Number.isFinite(entry.distanceMeters) && entry.distanceMeters <= NEARBY_RADIUS_METERS)
+      .sort((a, b) => a.distanceMeters - b.distanceMeters)
+      .slice(0, 3);
+  }, [formStep, location, data.reports]);
+
+  const upvoteNearby = async (reportId: string) => {
+    if (nearbyBusy) return;
+    setNearbyBusy(reportId);
+    try {
+      await backend.upvoteReport(reportId);
+      setNearbyUpvoted((current) => ({ ...current, [reportId]: true }));
+    } catch (error) {
+      console.error("Upvote failed", error);
+    } finally {
+      setNearbyBusy(null);
+    }
+  };
+
+  const restoreDraft = () => {
+    const raw = readStorageValue(REPORT_DRAFT_KEY);
+    if (!raw) {
+      setDraftAvailable(false);
+      return;
+    }
+    try {
+      const draft = JSON.parse(raw) as {
+        wardNumber?: string;
+        location?: { lat: number; lng: number; accuracy: number | null; recordedAt: string } | null;
+        address?: string;
+        severity?: SeverityKey;
+        category?: WasteCategory;
+      };
+      const ward = draft.wardNumber ? data.wards.find((item) => item.ward_number === Number(draft.wardNumber)) : undefined;
+      if (ward) {
+        setWardNumber(String(ward.ward_number));
+        setWardSearch(getWardSelectLabel(ward));
+        setLocationState("manual");
+      }
+      if (draft.location && Number.isFinite(draft.location.lat) && Number.isFinite(draft.location.lng)) {
+        setLocation(draft.location);
+        setLocationState("detected");
+      }
+      if (typeof draft.address === "string") setAddress(draft.address);
+      if (draft.severity && SEVERITY[draft.severity]) setSeverity(draft.severity);
+      if (draft.category && CATEGORIES[draft.category]) setCategory(draft.category);
+      announce("Draft restored. Re-add your photo, then submit.");
+    } catch {
+      try {
+        localStorage.removeItem(REPORT_DRAFT_KEY);
+      } catch {
+        // Ignore storage failures.
+      }
+    } finally {
+      setDraftAvailable(false);
+    }
+  };
+
+  const discardDraft = () => {
+    try {
+      localStorage.removeItem(REPORT_DRAFT_KEY);
+    } catch {
+      // Ignore storage failures.
+    }
+    setDraftAvailable(false);
+  };
+
   const guideToWardSearch = useCallback(() => {
     window.setTimeout(() => wardSearchRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 200);
     window.setTimeout(() => wardSearchRef.current?.focus({ preventScroll: true }), 350);
@@ -2440,7 +2687,8 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
       if (navigator.share) {
         await navigator.share({ title: "Amma Odisha", text, url });
       } else {
-        await navigator.clipboard?.writeText(text);
+        await copyTextToClipboard(text);
+        notifyCopied();
       }
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") return;
@@ -2595,6 +2843,12 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
 
   const onFile = (file?: File) => {
     if (!file) return;
+    const invalid = validateImageFile(file);
+    if (invalid) {
+      setFieldErrors((current) => ({ ...current, photo: invalid }));
+      announce(invalid);
+      return;
+    }
     if (photoPreviewRef.current) URL.revokeObjectURL(photoPreviewRef.current);
     const url = URL.createObjectURL(file);
     photoPreviewRef.current = url;
@@ -2679,6 +2933,12 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
       const submitted = await backend.submitReport(input);
       setSubmittedReviewStatus(submitted.moderation_status ?? "flagged");
       setSubmittedReport(submitted);
+      try {
+        localStorage.removeItem(REPORT_DRAFT_KEY);
+      } catch {
+        // Ignore storage failures.
+      }
+      setDraftAvailable(false);
       setSubmitSuccess(true);
       navigator.vibrate?.(35);
     } catch (caught) {
@@ -2717,6 +2977,22 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
           </p>
         </div>
       </div>
+      {draftAvailable && !submitSuccess && (
+        <div className="draft-banner" role="status">
+          <span>
+            <strong>Unsent draft found</strong>
+            Ward, landmark and severity are saved on this device. Re-add your photo after restoring.
+          </span>
+          <div className="draft-banner-actions">
+            <button type="button" className="secondary-cta" onClick={discardDraft}>
+              Discard
+            </button>
+            <button type="button" className="primary-cta" onClick={restoreDraft}>
+              Restore
+            </button>
+          </div>
+        </div>
+      )}
       <div className="sr-only" aria-live="assertive" role="alert">
         {liveMessage}
       </div>
@@ -2762,6 +3038,12 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
             <button className="primary-cta submit-open-button" type="button" onClick={onClose}>
               <CheckCircle2 size={14} />
               Back to map
+            </button>
+          )}
+          {onTrackReport && (
+            <button className="secondary-cta submit-track-button" type="button" onClick={onTrackReport}>
+              <ClipboardList size={14} />
+              Track in My Reports
             </button>
           )}
         </div>
@@ -2964,6 +3246,39 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
 
       {formStep === 3 && (
         <section className="wizard-panel" aria-labelledby="report-step-review">
+          {nearbyReports.length > 0 && (
+            <div className="nearby-reports-panel" role="status">
+              <strong>
+                {nearbyReports.length} unresolved {nearbyReports.length === 1 ? "report" : "reports"} at this spot
+              </strong>
+              <small>This spot may already be reported — upvoting it is faster than filing a duplicate.</small>
+              {nearbyReports.map(({ report, distanceMeters }) => (
+                <div key={report.id} className="nearby-report-row">
+                  <span className="nearby-report-info">
+                    <b>{report.address}</b>
+                    <small>
+                      {Math.max(1, Math.round(distanceMeters))}m away · {report.upvote_count ?? 1} upvotes
+                    </small>
+                  </span>
+                  <div className="nearby-report-actions">
+                    {onViewReport && (
+                      <button type="button" className="secondary-cta compact" onClick={() => onViewReport(report)}>
+                        View
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="secondary-cta compact"
+                      disabled={nearbyUpvoted[report.id] || nearbyBusy === report.id}
+                      onClick={() => void upvoteNearby(report.id)}
+                    >
+                      {nearbyUpvoted[report.id] ? "Upvoted ✓" : nearbyBusy === report.id ? "Upvoting…" : "Upvote"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           <div className={clsx("review-card", !photo && "has-error")} id="report-step-review">
             <strong>{selectedWard ? selectedWardLabel : "Ward not selected"}</strong>
             <span>{address || "No landmark added yet"}</span>
@@ -3039,6 +3354,7 @@ function ReportForm({ data, onClose, onSubmit }: { data: CivicData; onClose: () 
           onCancel={() => setShowDiscardConfirm(false)}
           onConfirm={() => {
             setShowDiscardConfirm(false);
+            discardDraft();
             onClose();
           }}
         />
@@ -3078,6 +3394,8 @@ function ProfileSheet({
   const wardMla = ward ? data.representatives.find((item) => item.role === "mla" && item.constituency === ward.assembly_constituency) : null;
   const wardMp = ward ? data.representatives.find((item) => item.role === "mp" && item.constituency === ward.parliamentary_constituency) : null;
   const contactRep = rep ?? wardMla;
+  const safeProfileUrl = safeExternalUrl(contactRep?.profile_url);
+  const twitterName = sanitizeHandle(contactRep?.twitter_handle);
   const [externalPreview, setExternalPreview] = useState<ExternalPreviewConfig | null>(null);
   const averageActiveDays = Math.round(activeReports.reduce((sum, report) => sum + daysActive(report.created_at), 0) / Math.max(1, activeReports.length));
 
@@ -3101,7 +3419,8 @@ function ProfileSheet({
       if (navigator.share) {
         await navigator.share({ title: `Amma Odisha - ${name}`, text, url });
       } else {
-        await navigator.clipboard?.writeText(text);
+        await copyTextToClipboard(text);
+        notifyCopied();
       }
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") return;
@@ -3207,7 +3526,7 @@ function ProfileSheet({
             Share ward data
           </button>
         )}
-        {contactRep && (contactRep.phone || contactRep.email || contactRep.twitter_handle || contactRep.profile_url) && (
+        {contactRep && (contactRep.phone || contactRep.email || twitterName || safeProfileUrl) && (
           <div className="rep-contact-card">
             <h3>{isWard ? "Representative contact" : "Contact"}</h3>
             {contactRep.phone && (
@@ -3222,14 +3541,14 @@ function ProfileSheet({
                 <span>{contactRep.email}</span>
               </a>
             )}
-            {contactRep.twitter_handle && (
-              <a className="rep-contact-row" href={`https://x.com/${contactRep.twitter_handle.replace(/^@/, "")}`} target="_blank" rel="noreferrer">
+            {twitterName && (
+              <a className="rep-contact-row" href={`https://x.com/${twitterName}`} target="_blank" rel="noreferrer">
                 <ExternalLink size={14} />
-                <span>@{contactRep.twitter_handle.replace(/^@/, "")}</span>
+                <span>@{twitterName}</span>
               </a>
             )}
-            {contactRep.profile_url && (
-              <a className="rep-contact-row" href={contactRep.profile_url} target="_blank" rel="noreferrer">
+            {safeProfileUrl && (
+              <a className="rep-contact-row" href={safeProfileUrl} target="_blank" rel="noreferrer">
                 <ArrowUpRight size={14} />
                 <span>Official profile</span>
               </a>
@@ -3269,7 +3588,7 @@ function AboutSheet({ onClose, onOpenChangelog }: { onClose: () => void; onOpenC
         <button className="close-button" onClick={onClose} aria-label="Close about">
           <X size={18} />
         </button>
-        <img className="about-hero-image" src="/garbage-about.png" alt="Illegal garbage dumping in Bhubaneswar" />
+        <img className="about-hero-image" src="/garbage-about.jpg" alt="Illegal garbage dumping in Bhubaneswar" />
         <h2>Why Amma Odisha?</h2>
         <p className="eyebrow">AMMA ODISHA</p>
         <p>
@@ -3416,5 +3735,39 @@ function TelegramToast({ trigger }: { trigger: boolean }) {
         Join
       </a>
     </div>
+  );
+}
+
+const SHORTCUTS: { keys: string; action: string }[] = [
+  { keys: "/", action: "Open search & filters" },
+  { keys: "N", action: "Start a new report" },
+  { keys: "M", action: "Toggle map / list view" },
+  { keys: "?", action: "Toggle this shortcut list" },
+  { keys: "Esc", action: "Close any open sheet or dialog" }
+];
+
+function ShortcutsHelp({ onClose }: { onClose: () => void }) {
+  return (
+    <DialogSurface ariaLabel="Keyboard shortcuts" className="profile-sheet small shortcuts-sheet" onClose={onClose}>
+      <button className="close-button" onClick={onClose} aria-label="Close keyboard shortcuts">
+        <X size={18} />
+      </button>
+      <div className="sheet-title-row">
+        <div>
+          <p className="eyebrow">Power user</p>
+          <h2>Keyboard shortcuts</h2>
+        </div>
+        <SlidersHorizontal size={20} aria-hidden="true" />
+      </div>
+      <p className="muted">Shortcuts are ignored while you are typing in a field.</p>
+      <ul className="shortcuts-list">
+        {SHORTCUTS.map((shortcut) => (
+          <li key={shortcut.keys}>
+            <kbd>{shortcut.keys}</kbd>
+            <span>{shortcut.action}</span>
+          </li>
+        ))}
+      </ul>
+    </DialogSurface>
   );
 }

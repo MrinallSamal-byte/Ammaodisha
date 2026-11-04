@@ -12,6 +12,7 @@ import type {
   ModerationStatus,
   NewReportInput,
   Representative,
+  ResolveReportDelta,
   ResolveReportInput,
   SeverityKey,
   UploadReportPhotoOptions,
@@ -829,7 +830,7 @@ class LocalBackend implements Backend {
     return report;
   }
 
-  async resolveReport(reportId: string, input: ResolveReportInput) {
+  async resolveReport(reportId: string, input: ResolveReportInput): Promise<ResolveReportDelta> {
     const existing = (await this.fetchCivicData()).reports.find((report) => report.id === reportId);
     if (!existing) throw new Error("Report not found");
 
@@ -979,9 +980,14 @@ class SupabaseBackend extends LocalBackend {
           .in("report_id", chunk)
       )
     );
+    // Degrade gracefully: a failed count query must not take down the whole
+    // app — fall back to the persisted upvote_count from the view instead.
+    if (upvoteResults.some(({ error }) => error)) {
+      console.warn("Supabase upvote count fetch failed for some chunks; using persisted counts");
+      return reports;
+    }
     const upvoteRows: { report_id: string }[] = [];
-    for (const { data, error } of upvoteResults) {
-      if (error) throw error;
+    for (const { data } of upvoteResults) {
       upvoteRows.push(...((data ?? []) as { report_id: string }[]));
     }
 
@@ -1016,6 +1022,18 @@ class SupabaseBackend extends LocalBackend {
   }
 
   override async fetchCivicData(): Promise<CivicData> {
+    // Degrade to the local seed on ANY failure (network down, Supabase
+    // outage, auth/RLS breakage). The rest of the data path already falls
+    // back the same way; crashing to the error screen helps no one.
+    try {
+      return await this.fetchSupabaseCivicData();
+    } catch (error) {
+      console.warn("Supabase civic data fetch failed; using local seed data", error);
+      return this.fallback.fetchCivicData();
+    }
+  }
+
+  private async fetchSupabaseCivicData(): Promise<CivicData> {
     const [wards, representatives, reports, wardBoundaries, cityBoundary, politicalMapping] = await Promise.all([
       this.client
         .from("wards")
@@ -1133,7 +1151,7 @@ class SupabaseBackend extends LocalBackend {
     }
     if (error) throw error;
     recordSubmission();
-    return normalizeReport({
+    const submitted = normalizeReport({
       ...submittedInput,
       id,
       status: "unresolved",
@@ -1148,9 +1166,13 @@ class SupabaseBackend extends LocalBackend {
       },
       flag_count: 0
     });
+    // Mirror the submission locally so "My Reports" can track it while it
+    // waits in the moderation queue (pending reports are invisible publicly).
+    upsertLocalReports([submitted]);
+    return submitted;
   }
 
-  override async resolveReport(reportId: string, input: ResolveReportInput): Promise<GarbageReport> {
+  override async resolveReport(reportId: string, input: ResolveReportInput): Promise<ResolveReportDelta> {
     const { error } = await this.client.rpc("submit_cleanup_proof", {
       p_report_id: reportId,
       p_photo_url: input.photoUrl ?? null,
@@ -1159,30 +1181,24 @@ class SupabaseBackend extends LocalBackend {
       p_lng: input.lng
     });
     if (error) throw error;
-    // Return a minimal delta — the caller (ResolveModal) will spread this
-    // over the original full report object to keep all original fields intact.
+    const now = new Date().toISOString();
+    // Return a minimal delta — the caller spreads this over the original
+    // report. Placeholder values for untouched fields (address, ward,
+    // severity…) must not be included or they would clobber the real data.
     return {
       id: reportId,
-      latitude: input.lat,
-      longitude: input.lng,
-      ward_number: 0,
-      address: "",
-      severity: "medium",
-      category: "mixed",
-      status: "unresolved",
-      upvote_count: 1,
-      created_at: new Date().toISOString(),
-      moderation_status: "flagged",
       resolved_photo_url: input.photoUrl ?? null,
       resolved_photo_thumb_url: input.photoThumbUrl ?? null,
       resolved_lat: input.lat,
       resolved_lng: input.lng,
+      moderation_status: "flagged",
       moderation_metadata: {
         flag_reason: "cleanup_submitted",
         cleanup_pending: true,
-        cleanup_submitted_at: new Date().toISOString()
-      }
-    } as GarbageReport;
+        cleanup_submitted_at: now
+      },
+      updated_at: now
+    };
   }
 
   override async upvoteReport(reportId: string) {
@@ -1199,7 +1215,15 @@ class SupabaseBackend extends LocalBackend {
       throw error;
     }
 
-    const newCount = await this.getReliableUpvoteCount(reportId);
+    // The vote is already recorded at this point — a failed count refresh
+    // must not surface as an upvote failure (the user would retry and hit
+    // the duplicate-key path). Degrade to a count-less success instead.
+    let newCount: number | undefined;
+    try {
+      newCount = await this.getReliableUpvoteCount(reportId);
+    } catch (countError) {
+      console.warn("Upvote recorded but the count refresh failed:", countError);
+    }
 
     markUpvoted(reportId);
     return { alreadyVoted: false, newCount };

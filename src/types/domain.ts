@@ -123,6 +123,21 @@ export interface ResolveReportInput {
   name?: string;
 }
 
+/** Fields the resolve flow actually changes; spread over the existing report. */
+export interface ResolveReportDelta {
+  id: string;
+  status?: ReportStatus;
+  resolved_photo_url?: string | null;
+  resolved_photo_thumb_url?: string | null;
+  resolved_lat?: number | null;
+  resolved_lng?: number | null;
+  resolved_at?: string | null;
+  resolved_by_name?: string | null;
+  moderation_status?: ModerationStatus;
+  moderation_metadata?: ModerationMetadata | null;
+  updated_at?: string | null;
+}
+
 export interface UploadReportPhotoOptions {
   onProgress?: (progress: number) => void;
 }
@@ -170,7 +185,12 @@ export interface Backend {
   fetchReportsByWard(wardNumber: number): Promise<GarbageReport[]>;
   fetchReportsByConstituency(constituency: string, type: "mla" | "mp"): Promise<GarbageReport[]>;
   submitReport(input: NewReportInput): Promise<GarbageReport>;
-  resolveReport(reportId: string, input: ResolveReportInput): Promise<GarbageReport>;
+  /**
+   * Returns a minimal delta — only the cleanup-proof fields change. Callers
+   * spread it over the existing report; it must never carry placeholder
+   * values for fields it does not intend to change.
+   */
+  resolveReport(reportId: string, input: ResolveReportInput): Promise<ResolveReportDelta>;
   upvoteReport(reportId: string): Promise<{ alreadyVoted: boolean; newCount?: number }>;
   uploadReportPhoto(file: File, options?: UploadReportPhotoOptions): Promise<UploadReportPhotoResult>;
   adminStats(adminKey: string): Promise<AdminStats>;

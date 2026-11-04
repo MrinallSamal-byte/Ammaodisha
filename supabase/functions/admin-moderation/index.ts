@@ -101,45 +101,66 @@ async function queue(status: string) {
 
 async function moderate(reportId: string, decision: string) {
   assertModerationStatus(decision);
-
-  // When approving a cleanup-proof submission, also mark the report resolved
-  const extraFields: Record<string, unknown> = {};
-  if (decision === "approved") {
-    const { data: existing } = await supabase
-      .from("garbage_reports")
-      .select("moderation_metadata")
-      .eq("id", reportId)
-      .maybeSingle();
-    const meta = (existing?.moderation_metadata ?? {}) as Record<string, unknown>;
-    if (meta.cleanup_pending === true) {
-      extraFields.status = "resolved";
-      extraFields.resolved_at = new Date().toISOString();
-    }
-  }
-
-  const { error } = await supabase
-    .from("garbage_reports")
-    .update({
-      moderation_status: decision,
-      moderation_metadata: { moderated_at: new Date().toISOString(), decision_source: "admin" },
-      ...extraFields
-    })
-    .eq("id", reportId);
-  if (error) throw error;
+  const result = await applyModeration([reportId], decision, "admin");
+  if (result.updated === 0) throw new Error("Report not found");
   return { success: true };
 }
 
 async function bulk(reportIds: string[], decision: string) {
   assertModerationStatus(decision);
-  const { error } = await supabase
+  const safeIds = Array.isArray(reportIds) ? reportIds.filter((id) => typeof id === "string") : [];
+  const result = await applyModeration(safeIds, decision, "admin_bulk");
+  return { success: true, updated: result.updated };
+}
+
+/**
+ * Shared moderation write used by single, bulk, swap and reject-both flows.
+ *
+ * - Merges `moderation_metadata` instead of replacing it, so the audit trail
+ *   (flag_reason, text_check, claude_check, vision_safesearch) survives
+ *   moderation decisions.
+ * - Applies the cleanup-proof rule uniformly: approving a report whose
+ *   metadata carries `cleanup_pending` flips it to `status = resolved`.
+ *   Previously only the single-decide path did this; bulk approvals left
+ *   cleanup proofs as active reports forever.
+ */
+async function applyModeration(
+  reportIds: string[],
+  decision: "flagged" | "approved" | "rejected",
+  source: "admin" | "admin_bulk"
+) {
+  const uniqueIds = [...new Set(reportIds.map((id) => id.trim()).filter(Boolean))];
+  if (!uniqueIds.length) return { updated: 0 };
+
+  const { data: existingRows, error: readError } = await supabase
     .from("garbage_reports")
-    .update({
-      moderation_status: decision,
-      moderation_metadata: { moderated_at: new Date().toISOString(), decision_source: "admin_bulk" }
-    })
-    .in("id", reportIds);
-  if (error) throw error;
-  return { success: true };
+    .select("id, moderation_metadata")
+    .in("id", uniqueIds);
+  if (readError) throw readError;
+
+  const now = new Date().toISOString();
+  let updated = 0;
+  for (const row of existingRows ?? []) {
+    const meta = (row.moderation_metadata ?? {}) as Record<string, unknown>;
+    const nextMeta: Record<string, unknown> = { ...meta, moderated_at: now, decision_source: source };
+    const fields: Record<string, unknown> = { moderation_status: decision, moderation_metadata: nextMeta };
+    if (decision === "approved" && meta.cleanup_pending === true) {
+      fields.status = "resolved";
+      fields.resolved_at = now;
+      nextMeta.cleanup_pending = false;
+      nextMeta.cleanup_approved_at = now;
+    } else if (decision === "rejected" && meta.cleanup_pending === true) {
+      // Rejection keeps the report active (the UI says so explicitly). Clear
+      // the pending flag so a later Restore does not resolve it with proof
+      // the admin already rejected.
+      nextMeta.cleanup_pending = false;
+      nextMeta.cleanup_rejected_at = now;
+    }
+    const { error } = await supabase.from("garbage_reports").update(fields).eq("id", row.id);
+    if (error) throw error;
+    updated += 1;
+  }
+  return { updated };
 }
 
 async function swapDuplicate(reportId: string, existingId: string) {

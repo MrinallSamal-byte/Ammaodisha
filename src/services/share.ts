@@ -1,6 +1,6 @@
 import { BMC_WHATSAPP, CATEGORIES, SEVERITY } from "./constants";
 import type { GarbageReport, Representative, Ward } from "../types/domain";
-import { daysActive } from "./time";
+import { daysActive, daysToResolve } from "./time";
 
 export function generateBMCComplaint(input: {
   address: string;
@@ -33,9 +33,13 @@ export function generateBMCComplaint(input: {
 
 export function getReportShareText(report: GarbageReport, ward?: Ward, mla?: Representative, origin = window.location.origin) {
   const url = `${origin}/report/${report.id}`;
-  return `Garbage dump at ${report.address}, ${ward?.ward_name ?? "Bhubaneswar"} — ${daysActive(
-    report.created_at
-  )} days unresolved.
+  const age = report.status === "resolved"
+    ? daysToResolve(report.created_at, report.resolved_at)
+    : daysActive(report.created_at);
+  const statusLine = report.status === "resolved"
+    ? `cleaned after ${age} days`
+    : `${age} days unresolved`;
+  return `Garbage dump at ${report.address}, ${ward?.ward_name ?? "Bhubaneswar"} — ${statusLine}.
 MLA: ${mla?.name ?? "?"} (${mla?.party ?? "?"})
 Tracked on Amma Odisha → ${url}
 
@@ -46,7 +50,7 @@ export function getWhatsAppUrl(message: string) {
   return `https://wa.me/${BMC_WHATSAPP}?text=${encodeURIComponent(message)}`;
 }
 
-async function copyText(text: string) {
+export async function copyTextToClipboard(text: string) {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
     return;
@@ -65,11 +69,25 @@ async function copyText(text: string) {
   if (!copied) throw new Error("Clipboard unavailable");
 }
 
+/**
+ * Notify the shell that something was copied — PublicApp renders a transient
+ * "Link copied" toast. Decoupled via a DOM event so deep components don't
+ * need prop-drilled callbacks.
+ */
+export function notifyCopied() {
+  try {
+    window.dispatchEvent(new CustomEvent("amma:copied"));
+  } catch {
+    // Non-DOM environment (tests) — nothing to notify.
+  }
+}
+
 export async function shareOrCopy(data: ShareData, fallbackUrl: string) {
   if (navigator.share) {
     await navigator.share(data);
     return "shared";
   }
-  await copyText(data.url ?? fallbackUrl);
+  await copyTextToClipboard(data.url ?? fallbackUrl);
+  notifyCopied();
   return "copied";
 }

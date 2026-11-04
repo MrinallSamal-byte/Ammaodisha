@@ -32,7 +32,9 @@ export default function App() {
   const [error, setError] = useState("");
   const [path, setPath] = useState(() => window.location.pathname);
   const [routeState, setRouteState] = useState<RouteHistoryState>(() => (window.history.state ?? {}) as RouteHistoryState);
-  const isAdmin = path === "/admin";
+  // Match `/admin` and any nested admin path (e.g. `/admin/`), not just the
+  // exact string — trailing slashes and subpaths should reach the admin panel.
+  const isAdmin = path === "/admin" || path.startsWith("/admin/");
 
   // Skip the civic-data fetch entirely when on the admin route — the admin panel
   // has its own data loading and does not depend on CivicData.
