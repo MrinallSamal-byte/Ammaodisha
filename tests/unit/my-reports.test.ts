@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getMyReports, isMyReport, trackMyReport } from "../../src/services/my-reports";
+import { getMyReports, getMyReportState, isMyReport, trackMyReport } from "../../src/services/my-reports";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -68,6 +68,30 @@ describe("isMyReport", () => {
 
   it("returns false when the registry is missing", () => {
     expect(isMyReport("anything")).toBe(false);
+  });
+});
+
+describe("getMyReportState", () => {
+  it("keeps approved unresolved reports live", () => {
+    expect(getMyReportState({ status: "unresolved", moderation_status: "approved" })).toBe("live");
+  });
+
+  it("treats flagged and rejected reports as pending, not live", () => {
+    expect(getMyReportState({ status: "unresolved", moderation_status: "flagged" })).toBe("inReviewOrRemoved");
+    expect(getMyReportState({ status: "unresolved", moderation_status: "rejected" })).toBe("inReviewOrRemoved");
+  });
+
+  it("treats resolved reports as cleaned", () => {
+    expect(getMyReportState({ status: "resolved", moderation_status: "approved" })).toBe("cleaned");
+  });
+
+  it("treats missing reports as pending", () => {
+    expect(getMyReportState(null)).toBe("inReviewOrRemoved");
+    expect(getMyReportState(undefined)).toBe("inReviewOrRemoved");
+  });
+
+  it("assumes legacy reports without moderation status are public", () => {
+    expect(getMyReportState({ status: "unresolved" })).toBe("live");
   });
 });
 

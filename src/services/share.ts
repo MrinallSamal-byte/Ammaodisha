@@ -1,6 +1,6 @@
 import { BMC_WHATSAPP, CATEGORIES, SEVERITY } from "./constants";
 import type { GarbageReport, Representative, Ward } from "../types/domain";
-import { daysActive } from "./time";
+import { daysActive, daysToResolve } from "./time";
 
 export function generateBMCComplaint(input: {
   address: string;
@@ -33,9 +33,13 @@ export function generateBMCComplaint(input: {
 
 export function getReportShareText(report: GarbageReport, ward?: Ward, mla?: Representative, origin = window.location.origin) {
   const url = `${origin}/report/${report.id}`;
-  return `Garbage dump at ${report.address}, ${ward?.ward_name ?? "Bhubaneswar"} — ${daysActive(
-    report.created_at
-  )} days unresolved.
+  const age = report.status === "resolved"
+    ? daysToResolve(report.created_at, report.resolved_at)
+    : daysActive(report.created_at);
+  const statusLine = report.status === "resolved"
+    ? `cleaned after ${age} days`
+    : `${age} days unresolved`;
+  return `Garbage dump at ${report.address}, ${ward?.ward_name ?? "Bhubaneswar"} — ${statusLine}.
 MLA: ${mla?.name ?? "?"} (${mla?.party ?? "?"})
 Tracked on Amma Odisha → ${url}
 
@@ -52,7 +56,7 @@ export function buildReportShareText(report: GarbageReport, url: string) {
   return [
     `Location: ${report.address}`,
     `Severity: ${severity}`,
-    `Days open: ${daysActive(report.created_at)}`,
+    `Days open: ${daysToResolve(report.created_at, report.resolved_at)}`,
     `Link: ${url}`
   ].join("\n");
 }

@@ -1,8 +1,25 @@
+import type { GarbageReport } from "../types/domain";
+
 export interface MyReportEntry {
   id: string;
   title: string;
   address: string;
   createdAt: string;
+}
+
+export type MyReportState = "cleaned" | "live" | "inReviewOrRemoved";
+
+/**
+ * A tracked report only counts as live once it is publicly approved. Newly
+ * submitted reports and cleanup proofs waiting in moderation stay pending.
+ */
+export function getMyReportState(
+  report: Pick<GarbageReport, "status" | "moderation_status"> | null | undefined
+): MyReportState {
+  if (!report) return "inReviewOrRemoved";
+  if (report.status === "resolved") return "cleaned";
+  if ((report.moderation_status ?? "approved") !== "approved") return "inReviewOrRemoved";
+  return "live";
 }
 
 const STORAGE_KEY = "ao_my_reports";

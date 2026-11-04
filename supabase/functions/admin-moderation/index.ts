@@ -139,26 +139,47 @@ function mergeModerationMetadata(existing: Record<string, unknown> | undefined, 
   return merged;
 }
 
+/**
+ * Builds the update for one moderation decision, applying cleanup-proof rules
+ * uniformly so single and bulk actions cannot drift apart.
+ */
+function buildModerationUpdate(
+  existing: Record<string, unknown> | undefined,
+  decision: "flagged" | "approved" | "rejected",
+  source: "admin" | "admin_bulk",
+  now: string,
+  rejectionReason?: string
+) {
+  const metadata = mergeModerationMetadata(existing, source, rejectionReason);
+  const fields: Record<string, unknown> = {
+    moderation_status: decision,
+    moderation_metadata: metadata
+  };
+
+  if (metadata.cleanup_pending === true && (decision === "approved" || decision === "rejected")) {
+    metadata.cleanup_pending = false;
+    if (decision === "approved") {
+      fields.status = "resolved";
+      fields.resolved_at = now;
+      metadata.cleanup_approved_at = now;
+    } else {
+      // Rejecting the proof must not reject the underlying report: restore it
+      // to the public map and record why the cleanup claim was refused.
+      fields.moderation_status = "approved";
+      metadata.cleanup_rejected_at = now;
+    }
+  }
+
+  return fields;
+}
+
 async function moderate(reportId: string, decision: string, rejectionReason?: string) {
   assertModerationStatus(decision);
 
   const existingMetadata = await fetchModerationMetadata([reportId]);
-  const currentMeta = existingMetadata.get(reportId);
-
-  // When approving a cleanup-proof submission, also mark the report resolved
-  const extraFields: Record<string, unknown> = {};
-  if (decision === "approved" && currentMeta?.cleanup_pending === true) {
-    extraFields.status = "resolved";
-    extraFields.resolved_at = new Date().toISOString();
-  }
-
   const { error } = await supabase
     .from("garbage_reports")
-    .update({
-      moderation_status: decision,
-      moderation_metadata: mergeModerationMetadata(currentMeta, "admin", rejectionReason),
-      ...extraFields
-    })
+    .update(buildModerationUpdate(existingMetadata.get(reportId), decision, "admin", new Date().toISOString(), rejectionReason))
     .eq("id", reportId);
   if (error) throw error;
   return { success: true };
@@ -169,14 +190,12 @@ async function bulk(reportIds: string[], decision: string) {
 
   // Update rows individually so each report keeps its existing audit trail.
   const existingMetadata = await fetchModerationMetadata(reportIds);
+  const now = new Date().toISOString();
   const results = await Promise.all(
     [...existingMetadata.keys()].map((reportId) =>
       supabase
         .from("garbage_reports")
-        .update({
-          moderation_status: decision,
-          moderation_metadata: mergeModerationMetadata(existingMetadata.get(reportId), "admin_bulk")
-        })
+        .update(buildModerationUpdate(existingMetadata.get(reportId), decision, "admin_bulk", now))
         .eq("id", reportId)
     )
   );

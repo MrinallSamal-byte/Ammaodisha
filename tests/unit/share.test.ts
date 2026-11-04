@@ -32,4 +32,19 @@ describe("share helpers", () => {
     expect(getReportShareText(report, ward, mla, "https://ammaodisha.in")).toContain("MLA: A. Citizen (INC)");
     expect(getReportShareText(report, ward, mla, "https://ammaodisha.in")).toContain("→");
   });
+
+  it("describes resolved reports by cleanup age instead of unresolved age", () => {
+    const report = {
+      id: "abc",
+      address: "Near Master Canteen",
+      created_at: "2026-01-01T00:00:00Z",
+      resolved_at: "2026-01-07T00:00:00Z",
+      status: "resolved"
+    } as GarbageReport;
+
+    const text = getReportShareText(report, undefined, undefined, "https://ammaodisha.in");
+
+    expect(text).toContain("cleaned after 6 days");
+    expect(text).not.toContain("days unresolved");
+  });
 });

@@ -37,10 +37,10 @@ import { escalationLevel } from "../services/escalation";
 import { distanceKm, findNearestWard, findWardInGeoJson, isInsideBoundary } from "../services/geo";
 import { t, useLang } from "../services/i18n";
 import { canSubmitReport, hasUpvoted } from "../services/limits";
-import { getMyReports, trackMyReport } from "../services/my-reports";
+import { getMyReportState, getMyReports, trackMyReport, type MyReportState } from "../services/my-reports";
 import { LOCAL_REPORT_PHOTO_FALLBACK_URL, ODISHA_GARBAGE_FALLBACK_IMAGE } from "../services/report-images";
 import { generateBMCComplaint, getReportShareText, getWhatsAppUrl, shareOrCopy, shareReportViaWhatsApp } from "../services/share";
-import { daysActive, shortDateI18n, timeAgoI18n } from "../services/time";
+import { daysActive, daysToResolve, shortDateI18n, timeAgoI18n } from "../services/time";
 import type {
   CivicData,
   GarbageReport,
@@ -182,7 +182,7 @@ function severityLabel(severity: SeverityKey) {
 }
 
 function daysOpen(report: GarbageReport) {
-  return daysActive(report.created_at);
+  return daysToResolve(report.created_at, report.resolved_at);
 }
 
 function getWardSearchText(ward: Ward) {
@@ -1926,7 +1926,7 @@ function ReportDetail({
   const mla = data.representatives.find((rep) => rep.role === "mla" && rep.constituency === ward?.assembly_constituency);
   const mp = data.representatives.find((rep) => rep.role === "mp" && rep.constituency === ward?.parliamentary_constituency);
   const severity = SEVERITY[report.severity] ?? SEVERITY.medium;
-  const canCompareResolvedPhotos = Boolean(report.photo_url && report.resolved_photo_url);
+  const canCompareResolvedPhotos = Boolean(report.status === "resolved" && report.photo_url && report.resolved_photo_url);
   const days = daysOpen(report);
   const escLevel = escalationLevel(days);
 
@@ -2142,7 +2142,7 @@ function ReportDetail({
           </div>
           <div className="detail-stat-divider" aria-hidden="true" />
           <div className="detail-stat">
-            <strong style={{ color: "#f97316" }}>{daysActive(report.created_at)}</strong>
+            <strong style={{ color: "#f97316" }}>{days}</strong>
             <span>{t("detail.statDays")}</span>
           </div>
           <div className="detail-stat-divider" aria-hidden="true" />
@@ -2649,15 +2649,13 @@ function DiscardViewDialog({ onCancel, onConfirm }: { onCancel: () => void; onCo
   );
 }
 
-type MyReportState = "cleaned" | "live" | "inReviewOrRemoved";
-
 function MyReportsSheet({ reports, reportsUnavailable = false, onRetry, navigate, onClose, onSelectReport }: { reports: GarbageReport[]; reportsUnavailable?: boolean; onRetry?: () => void | Promise<void>; navigate: (path: string) => void; onClose: () => void; onSelectReport: (report: GarbageReport) => void }) {
   const entries = useMemo(() => getMyReports(), []);
   const rows = useMemo(
     () =>
       entries.map((entry) => {
         const report = reports.find((item) => item.id === entry.id) ?? null;
-        const state: MyReportState = !report ? "inReviewOrRemoved" : report.status === "resolved" ? "cleaned" : "live";
+        const state: MyReportState = getMyReportState(report);
         return { entry, report, state };
       }),
     [entries, reports]

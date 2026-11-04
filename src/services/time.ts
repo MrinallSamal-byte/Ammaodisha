@@ -4,6 +4,18 @@ export function daysActive(createdAt: string): number {
   return Math.max(0, Math.floor((Date.now() - created) / 86_400_000));
 }
 
+/**
+ * Days a report stayed open: creation → resolution. Falls back to days since
+ * creation when the report is unresolved or `resolved_at` is missing/invalid.
+ */
+export function daysToResolve(createdAt: string, resolvedAt?: string | null): number {
+  if (!resolvedAt) return daysActive(createdAt);
+  const created = new Date(createdAt).getTime();
+  const resolved = new Date(resolvedAt).getTime();
+  if (Number.isNaN(created) || Number.isNaN(resolved)) return daysActive(createdAt);
+  return Math.max(0, Math.floor((resolved - created) / 86_400_000));
+}
+
 export function timeAgo(createdAt: string): string {
   const diff = Math.max(0, Date.now() - new Date(createdAt).getTime());
   const minutes = Math.floor(diff / 60_000);

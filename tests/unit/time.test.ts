@@ -1,4 +1,4 @@
-import { daysActive, shortDate, timeAgo } from "../../src/services/time";
+import { daysActive, daysToResolve, shortDate, timeAgo } from "../../src/services/time";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -20,6 +20,26 @@ describe("daysActive", () => {
   it("never returns a negative number", () => {
     const future = new Date(Date.now() + 2 * DAY).toISOString();
     expect(daysActive(future)).toBe(0);
+  });
+});
+
+describe("daysToResolve", () => {
+  it("counts full days between creation and resolution", () => {
+    expect(daysToResolve("2026-01-01T00:00:00Z", "2026-01-07T00:00:00Z")).toBe(6);
+  });
+
+  it("falls back to days since creation when unresolved", () => {
+    const threeDaysAgo = new Date(Date.now() - 3 * DAY).toISOString();
+    expect(daysToResolve(threeDaysAgo)).toBe(3);
+  });
+
+  it("falls back to days since creation when resolved_at is invalid", () => {
+    const threeDaysAgo = new Date(Date.now() - 3 * DAY).toISOString();
+    expect(daysToResolve(threeDaysAgo, "not-a-date")).toBe(3);
+  });
+
+  it("never returns a negative number when resolved before creation", () => {
+    expect(daysToResolve("2026-01-07T00:00:00Z", "2026-01-01T00:00:00Z")).toBe(0);
   });
 });
 
