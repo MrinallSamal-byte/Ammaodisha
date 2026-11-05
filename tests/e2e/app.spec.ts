@@ -154,6 +154,34 @@ test("filtered list empty state can clear filters", async ({ page }) => {
   await expect(page.locator(".report-item").first()).toBeVisible();
 });
 
+test("language choice persists across reloads", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "language", { configurable: true, value: "en-US" });
+  });
+  await page.goto("/");
+  const toggle = page.locator(".lang-toggle-button");
+  const filters = page.locator(".filter-button");
+  await expect(toggle).toHaveText("ଓଡ଼ିଆ", { timeout: 30_000 });
+  await expect(filters).toContainText("Filters");
+  await page.getByRole("button", { name: /Start using map/i }).click();
+
+  await toggle.click();
+  await expect(toggle).toHaveText("EN");
+  await expect(filters).toContainText("ଫିଲଟର");
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("ao_lang"))).toBe("or");
+
+  await page.reload();
+  await expect(toggle).toHaveText("EN", { timeout: 30_000 });
+  await expect(filters).toContainText("ଫିଲଟର");
+
+  await toggle.click();
+  await expect(toggle).toHaveText("ଓଡ଼ିଆ");
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("ao_lang"))).toBe("en");
+  await page.reload();
+  await expect(toggle).toHaveText("ଓଡ଼ିଆ", { timeout: 30_000 });
+  await expect(filters).toContainText("Filters");
+});
+
 test("report form validates fields and confirms submission", async ({ page }) => {
   test.setTimeout(60_000);
   await pinEnglish(page);
@@ -186,6 +214,16 @@ test("report form validates fields and confirms submission", async ({ page }) =>
   const successScreen = page.locator(".submit-success-screen");
   await expect(successScreen.getByText(/Report submitted/i)).toBeVisible({ timeout: 20_000 });
   await expect(successScreen).toContainText(/We review every photo/i, { timeout: 20_000 });
+
+  await successScreen.getByRole("button", { name: /Back to map/i }).click();
+  await expect(successScreen).not.toBeVisible();
+  await page.getByRole("button", { name: /^My Reports$/i }).click();
+  const myReports = page.getByRole("dialog", { name: /^My Reports$/i });
+  await expect(myReports).toBeVisible();
+  const pendingRow = myReports.locator(".my-report-row").first();
+  await expect(pendingRow).toContainText("Near Unit 4 market");
+  await expect(pendingRow.locator(".status-chip")).toHaveText("Pending review");
+  await expect(pendingRow).toContainText(/Ward \d+/);
 });
 
 test("deep links open contextual public sheets", async ({ page }) => {
@@ -209,4 +247,14 @@ test("admin login route loads", async ({ page }) => {
   await expect(page.getByAltText("Amma Odisha")).toBeVisible();
   await expect(page.getByRole("heading", { name: /Amma Odisha Moderation/i })).toBeVisible();
   await expect(page.getByPlaceholder("Admin key")).toBeVisible();
+});
+
+test("admin login rejects an invalid key", async ({ page }) => {
+  await page.goto("/admin");
+  await page.getByPlaceholder("Admin key").fill("definitely-not-a-valid-admin-key");
+  await page.getByRole("button", { name: /^Login$/i }).click();
+
+  await expect(page.getByText("That admin key did not work. Check the key and try again.")).toBeVisible();
+  await expect(page.getByPlaceholder("Admin key")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Amma Odisha Moderation/i })).toBeVisible();
 });
